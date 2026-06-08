@@ -116,7 +116,7 @@ for ent in entregas:
     qty_t = ent["cantidad_tambores"]
     kilos = ent["kilos_neto"]
     
-    entregas_sql += f"INSERT INTO public.ficha_entregas_miel (id, apicultor_id, fecha, color_pfund, humedad, hmf, cantidad_tambores, kilos_neto) VALUES ({sql_val(ent_id)}, '{RUIZ_PROFILE_ID}', {sql_val(fecha)}, {sql_val(color)}, {sql_val(hum)}, {sql_val(hmf)}, {sql_val(qty_t)}, {sql_val(kilos)}) ON CONFLICT (id) DO NOTHING;\n"
+    entregas_sql += f"INSERT INTO public.ficha_entregas_miel (id, apicultor_id, fecha, color_pfund, humedad, hmf, cantidad_tambores) VALUES ({sql_val(ent_id)}, '{RUIZ_PROFILE_ID}', {sql_val(fecha)}, {sql_val(color)}, {sql_val(hum)}, {sql_val(hmf)}, {sql_val(qty_t)}) ON CONFLICT (id) DO NOTHING;\n"
     
     if "tambores" in ent:
         for t in ent["tambores"]:
@@ -131,7 +131,8 @@ for ent in entregas:
             t_hum = t.get("humedad", hum)
             t_hmf = t.get("hmf", hmf)
             
-            tambores_sql += f"INSERT INTO public.ficha_entrega_tambores (id, entrega_id, nro_tambor, barras_ean, lote, kilos_bruto, tara, kilos_neto, color_pfund, humedad, hmf, antibiotico) VALUES ({sql_val(t_id)}, {sql_val(ent_id)}, {sql_val(nro)}, {sql_val(ean)}, {sql_val(lote)}, {sql_val(bruto)}, {sql_val(tara)}, {sql_val(neto)}, {sql_val(t_color)}, {sql_val(t_hum)}, {sql_val(t_hmf)}, 'NEGATIVO') ON CONFLICT (id) DO NOTHING;\n"
+            tambores_sql += f"INSERT INTO public.ficha_entrega_tambores (id, entrega_id, nro_tambor, barras_ean, lote, kilos_bruto, tara, color_pfund, humedad, hmf, antibiotico) VALUES ({sql_val(t_id)}, {sql_val(ent_id)}, {sql_val(nro)}, {sql_val(ean)}, {sql_val(lote)}, {sql_val(bruto)}, {sql_val(tara)}, {sql_val(t_color)}, {sql_val(t_hum)}, {sql_val(t_hmf)}, 'NEGATIVO') ON CONFLICT (id) DO NOTHING;\n"
+
 
 envases_sql = "\n-- 6. INSERTAR CONTROL DE ENVASES\n"
 for env in envases:
