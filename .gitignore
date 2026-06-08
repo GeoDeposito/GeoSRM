@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Production builds
+dist/
+frontend/dist/
+
+# Local env files
+.env
+frontend/.env
+*.local
+
+# Python files
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+
+# Temporary files (Excel, system, etc.)
+~$*.xlsx
+.DS_Store
+Thumbs.db
+
+# Agent directories and logs
+.gemini/
+.clinerules
+.cursorrules

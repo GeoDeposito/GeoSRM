@@ -1,0 +1,2 @@
+/* Overwrite default Vite styles to load our premium design system */
+@import './styles/index.css';
