@@ -198,28 +198,20 @@ const initializeLocalStorageMock = () => {
   const combinedCuentaCorriente = [...MOCK_CUENTA_CORRIENTE, ...RUIZ_MOCK_CUENTA_CORRIENTE];
   const combinedOperculo = [...MOCK_OPERCULO, ...RUIZ_MOCK_OPERCULO];
 
-  if (!localStorage.getItem('srm_apicultores')) {
+  const storedApics = localStorage.getItem('srm_apicultores');
+  const hasRuiz = storedApics && storedApics.includes('e37fb194-9e25-5d90-b912-9925001072c0');
+
+  if (!localStorage.getItem('srm_apicultores') || !hasRuiz) {
     localStorage.setItem('srm_apicultores', JSON.stringify(combinedApicultores));
-  }
-  if (!localStorage.getItem('srm_entregas')) {
     localStorage.setItem('srm_entregas', JSON.stringify(combinedEntregas));
-  }
-  if (!localStorage.getItem('srm_tambores')) {
     localStorage.setItem('srm_tambores', JSON.stringify(combinedTambores));
-  }
-  if (!localStorage.getItem('srm_envases')) {
     localStorage.setItem('srm_envases', JSON.stringify(combinedEnvases));
-  }
-  if (!localStorage.getItem('srm_cuenta_corriente')) {
     localStorage.setItem('srm_cuenta_corriente', JSON.stringify(combinedCuentaCorriente));
-  }
-  if (!localStorage.getItem('srm_operculo')) {
     localStorage.setItem('srm_operculo', JSON.stringify(combinedOperculo));
-  }
-  if (!localStorage.getItem('srm_productos')) {
     localStorage.setItem('srm_productos', JSON.stringify(PRODUCTOS_MOCK));
   }
 };
+
 
 
 if (isMockMode) {
