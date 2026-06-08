@@ -101,3 +101,12 @@ export interface ApicultorCompleto extends Apicultor {
   operculo: FichaControlOperculo[];
 }
 
+export interface Producto {
+  codigo: number;
+  producto: string;
+  descripcion: string;
+  unidad: string;
+  categoria: string;
+}
+
+

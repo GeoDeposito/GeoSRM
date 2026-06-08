@@ -8,8 +8,17 @@ import type {
   FichaControlOperculo, 
   FichaEntregaTambor, 
   ApicultorCompleto, 
-  ApicultorDashboardStats 
+  ApicultorDashboardStats,
+  Producto
 } from '../types/srm.types';
+import {
+  PRODUCTOS_MOCK,
+  RUIZ_MOCK_ENTREGAS,
+  RUIZ_MOCK_ENVASES,
+  RUIZ_MOCK_CUENTA_CORRIENTE,
+  RUIZ_MOCK_OPERCULO,
+  RUIZ_PROFILE
+} from './ruizMockData';
 
 // =========================================================================
 // BASE DE DATOS MOCK (LOCAL STORAGE FALLBACK)
@@ -178,25 +187,40 @@ const MOCK_OPERCULO: FichaControlOperculo[] = [
 
 // Cargar Mock en LocalStorage si no existe
 const initializeLocalStorageMock = () => {
+  // Separar tambores de entregas para Ruiz Ruben Oscar
+  const ruizEntregasOnly = RUIZ_MOCK_ENTREGAS.map(({ tambores, ...rest }) => rest);
+  const ruizTamboresOnly = RUIZ_MOCK_ENTREGAS.flatMap(e => e.tambores || []);
+
+  const combinedApicultores = [...MOCK_APICULTORES, RUIZ_PROFILE];
+  const combinedEntregas = [...MOCK_ENTREGAS, ...ruizEntregasOnly];
+  const combinedTambores = [...MOCK_TAMBORES, ...ruizTamboresOnly];
+  const combinedEnvases = [...MOCK_ENVASES, ...RUIZ_MOCK_ENVASES];
+  const combinedCuentaCorriente = [...MOCK_CUENTA_CORRIENTE, ...RUIZ_MOCK_CUENTA_CORRIENTE];
+  const combinedOperculo = [...MOCK_OPERCULO, ...RUIZ_MOCK_OPERCULO];
+
   if (!localStorage.getItem('srm_apicultores')) {
-    localStorage.setItem('srm_apicultores', JSON.stringify(MOCK_APICULTORES));
+    localStorage.setItem('srm_apicultores', JSON.stringify(combinedApicultores));
   }
   if (!localStorage.getItem('srm_entregas')) {
-    localStorage.setItem('srm_entregas', JSON.stringify(MOCK_ENTREGAS));
+    localStorage.setItem('srm_entregas', JSON.stringify(combinedEntregas));
   }
   if (!localStorage.getItem('srm_tambores')) {
-    localStorage.setItem('srm_tambores', JSON.stringify(MOCK_TAMBORES));
+    localStorage.setItem('srm_tambores', JSON.stringify(combinedTambores));
   }
   if (!localStorage.getItem('srm_envases')) {
-    localStorage.setItem('srm_envases', JSON.stringify(MOCK_ENVASES));
+    localStorage.setItem('srm_envases', JSON.stringify(combinedEnvases));
   }
   if (!localStorage.getItem('srm_cuenta_corriente')) {
-    localStorage.setItem('srm_cuenta_corriente', JSON.stringify(MOCK_CUENTA_CORRIENTE));
+    localStorage.setItem('srm_cuenta_corriente', JSON.stringify(combinedCuentaCorriente));
   }
   if (!localStorage.getItem('srm_operculo')) {
-    localStorage.setItem('srm_operculo', JSON.stringify(MOCK_OPERCULO));
+    localStorage.setItem('srm_operculo', JSON.stringify(combinedOperculo));
+  }
+  if (!localStorage.getItem('srm_productos')) {
+    localStorage.setItem('srm_productos', JSON.stringify(PRODUCTOS_MOCK));
   }
 };
+
 
 if (isMockMode) {
   initializeLocalStorageMock();
@@ -228,6 +252,24 @@ export const srmService = {
     if (error) throw error;
     return data || [];
   },
+
+  async listProductos(): Promise<Producto[]> {
+    if (isMockMode) {
+      return getMockData<Producto>('srm_productos');
+    }
+    try {
+      const { data, error } = await supabase!
+        .from('productos')
+        .select('*')
+        .order('codigo', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    } catch (err) {
+      console.warn("⚠️ Supabase error getting products, using local fallback:", err);
+      return getMockData<Producto>('srm_productos') || PRODUCTOS_MOCK;
+    }
+  },
+
 
   async getApicultor(id: string): Promise<ApicultorCompleto> {
     if (isMockMode) {
