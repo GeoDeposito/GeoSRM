@@ -10,9 +10,8 @@ import {
   Plus, 
   ArrowLeft, 
   Search, 
-  Award, 
-  Info,
-  Warehouse
+  Award,
+  Info
 } from 'lucide-react';
 import { srmService } from './services/srmService';
 import { isMockMode } from './services/supabaseClient';
@@ -165,16 +164,17 @@ function App() {
     e.preventDefault();
     if (!apicultorSeleccionado) return;
     try {
-      // Auto-calculate kilos_miel_equiv if it is 0 and reference price is provided
+      // Auto-calculate or adjust manual input to ensure correct sign based on transaction type
       let finalKilos = newCCForm.kilos_miel_equiv;
       if (finalKilos === 0 && newCCForm.precio_referencia_miel > 0) {
-        if (newCCForm.tipo_transaccion === 'VENTA_LIQUIDACION') {
-          finalKilos = -Math.abs(newCCForm.monto / newCCForm.precio_referencia_miel);
-        } else if (newCCForm.tipo === 'DEBE') {
-          finalKilos = -Math.abs(newCCForm.monto / newCCForm.precio_referencia_miel);
-        } else {
-          finalKilos = Math.abs(newCCForm.monto / newCCForm.precio_referencia_miel);
-        }
+        finalKilos = newCCForm.monto / newCCForm.precio_referencia_miel;
+      }
+      
+      // Assign the correct sign: DEBE and VENTA_LIQUIDACION decrease honey balance (negative), HABER increases it (positive)
+      if (newCCForm.tipo_transaccion === 'VENTA_LIQUIDACION' || newCCForm.tipo === 'DEBE') {
+        finalKilos = -Math.abs(finalKilos);
+      } else {
+        finalKilos = Math.abs(finalKilos);
       }
 
       await srmService.createCuentaCorrienteMovimiento(
@@ -280,24 +280,16 @@ function App() {
         padding: '1.5rem 1rem'
       }}>
         <div>
-          {/* Logo y Encabezado */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '2rem', padding: '0 0.5rem' }}>
-            <div style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '10px',
-              backgroundColor: 'var(--secondary)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#FFFFFF'
-            }}>
-              <Warehouse size={22} style={{ color: 'var(--primary)' }} />
-            </div>
-            <div>
-              <h2 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-title)', lineHeight: 1.2 }}>APICULTOR SRM</h2>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                ADMINISTRACIÓN
+          {/* Logo y Encabezado de Geomiel */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '2rem', padding: '0.25rem 0.5rem' }}>
+            <img 
+              src="/logo-geomiel.png" 
+              alt="Geomiel Logo" 
+              style={{ height: '34px', width: 'auto', objectFit: 'contain', alignSelf: 'flex-start' }} 
+            />
+            <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem', marginTop: '0.25rem' }}>
+              <span className="label-caps" style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontWeight: 700, letterSpacing: '0.12em' }}>
+                APICULTOR SRM
               </span>
             </div>
           </div>
@@ -632,7 +624,7 @@ function App() {
                   fontSize: '0.9rem'
                 }}
               >
-                <Plus size={18} style={{ color: 'var(--primary)' }} />
+                <Plus size={18} style={{ color: '#FFFFFF' }} />
                 Registrar Apicultor
               </button>
             </div>
@@ -819,14 +811,14 @@ function App() {
               </div>
 
               {/* Saldo Opérculo */}
-              <div className="card-premium" style={{ borderLeft: '4px solid #8B5A2B' }}>
+              <div className="card-premium" style={{ borderLeft: '4px solid var(--secondary)' }}>
                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
                   Saldo Opérculo (OP)
                 </span>
                 <h2 style={{ 
                   fontSize: '1.75rem', 
                   fontWeight: 800, 
-                  color: apicultorSeleccionado.stats.saldo_operculo >= 0 ? '#8B5A2B' : 'var(--danger)', 
+                  color: apicultorSeleccionado.stats.saldo_operculo >= 0 ? 'var(--secondary)' : 'var(--danger)', 
                   marginTop: '0.25rem' 
                 }}>
                   {apicultorSeleccionado.stats.saldo_operculo >= 0 ? '+' : ''}
@@ -894,7 +886,7 @@ function App() {
                     fontSize: '0.9rem',
                     whiteSpace: 'nowrap',
                     color: activeTab === t.id ? 'var(--secondary)' : 'var(--text-secondary)',
-                    borderBottom: activeTab === t.id ? '3px solid var(--primary-dark)' : 'none',
+                    borderBottom: activeTab === t.id ? '3px solid var(--secondary)' : 'none',
                     marginBottom: '-2px'
                   }}
                 >
@@ -919,19 +911,19 @@ function App() {
                       Identificación Comercial
                     </h4>
                     <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Código de Apicultor (API)</label>
+                      <label className="label-caps">Código de Apicultor (API)</label>
                       <p className="font-mono" style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', marginTop: '0.25rem' }}>{apicultorSeleccionado.cod_api || 'No asignado'}</p>
                     </div>
                     <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>CUIT</label>
+                      <label className="label-caps">CUIT</label>
                       <p className="font-mono" style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', marginTop: '0.25rem' }}>{apicultorSeleccionado.cuit}</p>
                     </div>
                     <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>DNI</label>
+                      <label className="label-caps">DNI</label>
                       <p className="font-mono" style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', marginTop: '0.25rem' }}>{apicultorSeleccionado.dni || 'No declarado'}</p>
                     </div>
                     <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>RENAPA</label>
+                      <label className="label-caps">RENAPA</label>
                       <p className="font-mono" style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', textTransform: 'uppercase', marginTop: '0.25rem' }}>{apicultorSeleccionado.renapa || 'No registrado'}</p>
                     </div>
                   </div>
@@ -942,19 +934,19 @@ function App() {
                       Contacto y Ubicación
                     </h4>
                     <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Localidad</label>
+                      <label className="label-caps">Localidad</label>
                       <p style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', marginTop: '0.25rem' }}>{apicultorSeleccionado.localidad || 'No declarada'}</p>
                     </div>
                     <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Provincia</label>
+                      <label className="label-caps">Provincia</label>
                       <p style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', marginTop: '0.25rem' }}>{apicultorSeleccionado.provincia || 'No declarada'}</p>
                     </div>
                     <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Teléfono de Contacto</label>
+                      <label className="label-caps">Teléfono de Contacto</label>
                       <p className="font-mono" style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', marginTop: '0.25rem' }}>{apicultorSeleccionado.telefono || 'No declarado'}</p>
                     </div>
                     <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Puntuación / Calificación</label>
+                      <label className="label-caps">Puntuación / Calificación</label>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.25rem' }}>
                         {[1, 2, 3, 4, 5].map((s) => (
                           <Award key={s} size={18} style={{ 
@@ -993,7 +985,7 @@ function App() {
                       fontWeight: 600
                     }}
                   >
-                    <Plus size={16} style={{ color: 'var(--primary)' }} />
+                    <Plus size={16} style={{ color: '#FFFFFF' }} />
                     Registrar Nueva Entrega
                   </button>
                 </div>
@@ -1085,7 +1077,7 @@ function App() {
                       fontWeight: 600
                     }}
                   >
-                    <Plus size={16} style={{ color: 'var(--primary)' }} />
+                    <Plus size={16} style={{ color: '#FFFFFF' }} />
                     Registrar Movimiento
                   </button>
                 </div>
@@ -1189,7 +1181,7 @@ function App() {
                         fontWeight: 600
                       }}
                     >
-                      <Plus size={16} style={{ color: 'var(--primary)' }} />
+                      <Plus size={16} style={{ color: '#FFFFFF' }} />
                       Registrar Transacción CC
                     </button>
                   </div>
@@ -1320,7 +1312,7 @@ function App() {
                         fontWeight: 600
                       }}
                     >
-                      <Plus size={16} style={{ color: 'var(--primary)' }} />
+                      <Plus size={16} style={{ color: '#FFFFFF' }} />
                       Registrar Movimiento Opérculo
                     </button>
                   </div>
@@ -1331,7 +1323,7 @@ function App() {
                     borderRadius: '8px',
                     fontSize: '0.8rem',
                     color: 'var(--text-secondary)',
-                    borderLeft: '4px solid #8B5A2B',
+                    borderLeft: '4px solid var(--secondary)',
                     lineHeight: '1.4'
                   }}>
                     <strong>Conversión de Cera a Opérculo</strong>: Los retiros de cera se dividen por el rendimiento de 0.8 kg cera/kg op (ej. retirar 70 kg de cera equivale a retirar 87.5 kg de opérculo de tu saldo).
@@ -1712,32 +1704,32 @@ function App() {
                     type="number" required min="0" step="any"
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
                     value={newCCForm.monto}
-                    onChange={e => setNewCCForm({ ...newCCForm, monto: parseFloat(e.target.value) })}
+                    onChange={e => setNewCCForm({ ...newCCForm, monto: parseFloat(e.target.value) || 0 })}
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Precio Ref. Miel (por kg)</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Precio Ref. Pactado con Apicultor (por kg)</label>
                   <input 
                     type="number" required min="0" step="any"
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
                     value={newCCForm.precio_referencia_miel}
                     placeholder="Ej: 300 o 1.2"
-                    onChange={e => setNewCCForm({ ...newCCForm, precio_referencia_miel: parseFloat(e.target.value) })}
+                    onChange={e => setNewCCForm({ ...newCCForm, precio_referencia_miel: parseFloat(e.target.value) || 0 })}
                   />
                 </div>
               </div>
 
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Kilos Miel Equiv. (Manual o auto-calculado si se deja en 0)</label>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Kilos Miel Equiv. (Ingresar manualmente o dejar en 0 para auto-calcular)</label>
                 <input 
                   type="number" step="any"
                   style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
                   value={newCCForm.kilos_miel_equiv}
                   placeholder="0 para auto-calcular"
-                  onChange={e => setNewCCForm({ ...newCCForm, kilos_miel_equiv: parseFloat(e.target.value) })}
+                  onChange={e => setNewCCForm({ ...newCCForm, kilos_miel_equiv: parseFloat(e.target.value) || 0 })}
                 />
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  Auto-cálculo: `{newCCForm.precio_referencia_miel > 0 ? (newCCForm.monto / newCCForm.precio_referencia_miel).toFixed(2) : '0.00'} kg` de miel.
+                  Auto-cálculo sugerido: <strong>{newCCForm.precio_referencia_miel > 0 ? (newCCForm.monto / newCCForm.precio_referencia_miel).toFixed(2) : '0.00'} kg</strong> de miel. El negocio con cada apicultor es particular.
                 </span>
               </div>
 

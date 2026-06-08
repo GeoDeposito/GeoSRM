@@ -1,43 +1,45 @@
 /* src/styles/variables.css */
 :root {
   /* Fondo general y contenedores */
-  --bg-app: #F8F9FA;             /* Surface / Background (gris ultra-claro premium) */
+  --bg-app: #FBF9F8;             /* Surface / Background (crema ultra-claro premium) */
   --bg-card: #FFFFFF;            /* Surface Container Lowest (blanco puro) */
-  --bg-sidebar: #F8F9FA;         /* Surface / Canvas */
-  --bg-sidebar-active: rgba(115, 92, 0, 0.08); /* 8% Primary opacity */
-  --border-color: #D0C5AF;       /* Outline Variant (dorado suave sutil) */
-  --border-color-glow: rgba(212, 175, 55, 0.2); /* Golden border glow */
+  --bg-sidebar: #FFFFFF;         /* Light Sidebar (blanco puro) */
+  --bg-sidebar-active: rgba(125, 87, 0, 0.08); /* 8% Honey Gold opacity */
+  --border-color: #EFEDED;       /* Surface Container */
+  --border-color-glow: rgba(125, 87, 0, 0.15); /* Honey Gold border glow */
   
-  /* Colores de Marca y Acentos (Amber Governance) */
-  --primary: #735C00;            /* Honey Gold (acción principal, identidad de marca) */
-  --primary-dark: #554300;       /* Tono más oscuro de Honey Gold */
-  --primary-light: #FFE088;      /* Primary Fixed */
-  --primary-container: #D4AF37;  /* Oro Brillante */
+  /* Colores de Marca y Acentos (Apiary Flow Premium) */
+  --primary: #08201A;            /* Forest Green (identidad principal) */
+  --primary-dark: #071F1A;       /* Tono más oscuro de Forest Green */
+  --primary-light: #CEE8DF;      /* Primary Fixed */
+  --primary-container: #1E352F;  /* Verde intermedio */
   
-  --secondary: #54606A;          /* Professional Slate (Gris Pizarra para tipografía de peso y nav) */
-  --secondary-light: #D7E4F0;    /* Secondary Container */
+  --secondary: #7D5700;          /* Honey Gold (acentos y CTAs) */
+  --secondary-light: #FFDEAB;    /* Gold/Amber suave */
+  --secondary-container: #FDBE49; /* Oro brillante / Honey Active */
   
-  --amber: #795900;              /* Warm Amber (Tertiary para alertas leves, detalles) */
-  --amber-light: #FFDFA0;
-  --amber-dark: #5A4100;
+  --amber: #7D5700;              /* Golden Amber */
+  --amber-light: #FFE0A3;
+  --amber-dark: #5F4100;
   
   --danger: #BA1A1A;             /* Rojo de control (Error / Alertas) */
   --danger-light: #FFDAD6;
   --danger-dark: #93000A;
   
   /* Textos */
-  --text-title: #191C1D;         /* On Surface (gris casi negro para legibilidad ejecutiva) */
-  --text-body: #191C1D;          /* On Surface */
-  --text-secondary: #4D4635;     /* On Surface Variant (gris cálido para subtítulos) */
+  --text-title: #1B1C1C;         /* On Surface (gris casi negro para legibilidad ejecutiva) */
+  --text-body: #1B1C1C;          /* On Surface */
+  --text-secondary: #424846;     /* On Surface Variant (gris verdoso para subtítulos) */
   
   /* Componentes del Tablero */
   --radius-premium: 16px;        /* 1rem / 16px base radius */
   --radius-sm: 8px;              /* 0.5rem base radius */
-  --shadow-subtle: 0 4px 20px -2px rgba(84, 96, 106, 0.06); /* Ambient Slate shadow */
-  --shadow-card: 0 10px 30px -5px rgba(84, 96, 106, 0.12);
+  --shadow-subtle: 0 4px 24px -2px rgba(8, 32, 26, 0.04); /* Ambient Forest shadow */
+  --shadow-card: 0 12px 32px -4px rgba(8, 32, 26, 0.08);
   
   /* Fuentes */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-title: 'Hanken Grotesk', 'Inter', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-title: 'Manrope', 'Inter', sans-serif;
+  --font-mono: 'Inter', monospace;
+  --font-label: 'Work Sans', sans-serif;
 }
