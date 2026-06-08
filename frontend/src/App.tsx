@@ -285,7 +285,7 @@ function App() {
             <img 
               src="/logo-geomiel.png" 
               alt="Geomiel Logo" 
-              style={{ height: '34px', width: 'auto', objectFit: 'contain', alignSelf: 'flex-start' }} 
+              style={{ height: '52px', width: 'auto', objectFit: 'contain', alignSelf: 'flex-start' }} 
             />
             <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem', marginTop: '0.25rem' }}>
               <span className="label-caps" style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontWeight: 700, letterSpacing: '0.12em' }}>
