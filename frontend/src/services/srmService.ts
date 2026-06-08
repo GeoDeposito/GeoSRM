@@ -661,5 +661,97 @@ export const srmService = {
       entregas_totales_kilos: entregas_kilos,
       entregas_totales_tambores: entregas_tambores
     };
+  },
+
+  async getGlobalStats(): Promise<{
+    totalKilosMiel: number;
+    totalTamboresCampo: number;
+    totalMielEquivSaldo: number;
+    incidencias: { id: string; apicultor_nombre: string; fecha: string; humedad: number; hmf: number; kilos_neto: number; cantidad_tambores: number }[];
+  }> {
+    if (isMockMode) {
+      const entregas = getMockData<FichaEntregaMiel>('srm_entregas');
+      const envases = getMockData<FichaControlEnvases>('srm_envases');
+      const cc = getMockData<FichaCuentaCorriente>('srm_cuenta_corriente');
+      const apicultores = getMockData<Apicultor>('srm_apicultores');
+
+      const totalKilosMiel = entregas.reduce((acc, curr) => acc + curr.kilos_neto, 0);
+      const totalTamboresCampo = envases.reduce((acc, curr) => acc + (curr.tipo_movimiento === 'PRESTAMO' ? curr.cantidad : -curr.cantidad), 0);
+      
+      let totalMielEquivSaldo = totalKilosMiel;
+      cc.forEach(item => {
+        if (item.kilos_miel_equiv) {
+          totalMielEquivSaldo += item.kilos_miel_equiv;
+        }
+      });
+
+      const incidencias: any[] = [];
+      entregas.forEach(e => {
+        if (e.humedad > 18.0 || e.hmf > 40.0) {
+          const apicultor = apicultores.find(a => a.id === e.apicultor_id);
+          incidencias.push({
+            id: e.id,
+            apicultor_nombre: apicultor ? apicultor.nombre : 'Desconocido',
+            fecha: e.fecha,
+            humedad: e.humedad,
+            hmf: e.hmf,
+            kilos_neto: e.kilos_neto,
+            cantidad_tambores: e.cantidad_tambores
+          });
+        }
+      });
+
+      return {
+        totalKilosMiel,
+        totalTamboresCampo,
+        totalMielEquivSaldo,
+        incidencias
+      };
+    }
+
+    // Supabase Mode
+    const { data: entregas, error: errE } = await supabase!
+      .from('ficha_entregas_miel')
+      .select('id, apicultor_id, fecha, kilos_neto, humedad, hmf, cantidad_tambores');
+    if (errE) throw errE;
+
+    const { data: envases, error: errN } = await supabase!
+      .from('ficha_control_envases')
+      .select('tipo_movimiento, cantidad');
+    if (errN) throw errN;
+
+    const { data: cc, error: errC } = await supabase!
+      .from('ficha_cuenta_corriente')
+      .select('kilos_miel_equiv');
+    if (errC) throw errC;
+
+    const apicultores = await this.listApicultores();
+
+    const totalKilosMiel = (entregas || []).reduce((acc, curr) => acc + curr.kilos_neto, 0);
+    const totalTamboresCampo = (envases || []).reduce((acc, curr) => acc + (curr.tipo_movimiento === 'PRESTAMO' ? curr.cantidad : -curr.cantidad), 0);
+    const totalMielEquivSaldo = totalKilosMiel + (cc || []).reduce((acc, curr) => acc + (curr.kilos_miel_equiv || 0), 0);
+
+    const incidencias: any[] = [];
+    (entregas || []).forEach(e => {
+      if (e.humedad > 18.0 || e.hmf > 40.0) {
+        const apicultor = apicultores.find(a => a.id === e.apicultor_id);
+        incidencias.push({
+          id: e.id,
+          apicultor_nombre: apicultor ? apicultor.nombre : 'Desconocido',
+          fecha: e.fecha,
+          humedad: e.humedad,
+          hmf: e.hmf,
+          kilos_neto: e.kilos_neto,
+          cantidad_tambores: e.cantidad_tambores
+        });
+      }
+    });
+
+    return {
+      totalKilosMiel,
+      totalTamboresCampo,
+      totalMielEquivSaldo,
+      incidencias
+    };
   }
 };

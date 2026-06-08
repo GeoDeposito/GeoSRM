@@ -24,6 +24,17 @@ function App() {
   const [apicultorSeleccionado, setApicultorSeleccionado] = useState<ApicultorCompleto | null>(null);
   const [view, setView] = useState<'dashboard' | 'detail'>('dashboard');
   const [activeTab, setActiveTab] = useState<'general' | 'entregas' | 'envases' | 'cuenta_corriente' | 'operculo'>('general');
+  const [globalStats, setGlobalStats] = useState<{
+    totalKilosMiel: number;
+    totalTamboresCampo: number;
+    totalMielEquivSaldo: number;
+    incidencias: any[];
+  }>({
+    totalKilosMiel: 0,
+    totalTamboresCampo: 0,
+    totalMielEquivSaldo: 0,
+    incidencias: []
+  });
   
   // Estados de filtros
   const [searchQuery, setSearchQuery] = useState('');
@@ -75,6 +86,8 @@ function App() {
     try {
       const lista = await srmService.listApicultores();
       setApicultores(lista);
+      const stats = await srmService.getGlobalStats();
+      setGlobalStats(stats);
     } catch (e) {
       console.error('Error cargando apicultores:', e);
     }
@@ -589,6 +602,164 @@ function App() {
             ------------------------------------------------------------------- */}
         {view === 'dashboard' && (
           <>
+            {/* Grid de Indicadores Globales SRM */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+              gap: '1.5rem',
+              marginBottom: '1.5rem'
+            }}>
+              {/* Card 1: Productores Activos */}
+              <div className="card-premium hex-pattern" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                <div style={{
+                  width: '48px',
+                  height: '48px',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(8, 32, 26, 0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--primary)'
+                }}>
+                  <Users size={24} />
+                </div>
+                <div>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Productores Activos</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
+                    {apicultores.length}
+                  </span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.125rem' }}>Proveedores homologados</span>
+                </div>
+              </div>
+
+              {/* Card 2: Miel Física Acumulada */}
+              <div className="card-premium hex-pattern" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                <div style={{
+                  width: '48px',
+                  height: '48px',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(125, 87, 0, 0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--secondary)'
+                }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '24px', color: 'var(--secondary)' }}>science</span>
+                </div>
+                <div>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Miel Física Recibida</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
+                    {globalStats.totalKilosMiel.toLocaleString('es-AR')} kg
+                  </span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.125rem' }}>Total en depósitos</span>
+                </div>
+              </div>
+
+              {/* Card 3: Tambores en el Campo */}
+              <div className="card-premium hex-pattern" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                <div style={{
+                  width: '48px',
+                  height: '48px',
+                  borderRadius: '12px',
+                  backgroundColor: globalStats.totalTamboresCampo > 0 ? 'rgba(186, 26, 26, 0.08)' : 'rgba(19, 115, 51, 0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: globalStats.totalTamboresCampo > 0 ? 'var(--danger)' : '#137333'
+                }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>shopping_bag</span>
+                </div>
+                <div>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Envases en el Campo</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
+                    {globalStats.totalTamboresCampo} tambores
+                  </span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.125rem' }}>Pendientes de retorno</span>
+                </div>
+              </div>
+
+              {/* Card 4: Balance de Miel Equivalente */}
+              <div className="card-premium hex-pattern" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                <div style={{
+                  width: '48px',
+                  height: '48px',
+                  borderRadius: '12px',
+                  backgroundColor: globalStats.totalMielEquivSaldo >= 0 ? 'rgba(19, 115, 51, 0.08)' : 'rgba(186, 26, 26, 0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: globalStats.totalMielEquivSaldo >= 0 ? '#137333' : 'var(--danger)'
+                }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>balance</span>
+                </div>
+                <div>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Balance Miel Equivalente</span>
+                  <span style={{ 
+                    fontSize: '1.75rem', 
+                    fontWeight: 800, 
+                    color: globalStats.totalMielEquivSaldo >= 0 ? '#137333' : 'var(--danger)', 
+                    fontFamily: 'var(--font-title)' 
+                  }}>
+                    {globalStats.totalMielEquivSaldo.toLocaleString('es-AR')} kg
+                  </span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.125rem' }}>
+                    {globalStats.totalMielEquivSaldo >= 0 ? 'Excedente a favor' : 'Deuda de apicultores'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Panel de Alertas Críticas de Calidad (Humedad > 18% o HMF > 40) */}
+            {globalStats.incidencias.length > 0 && (
+              <div style={{
+                backgroundColor: 'var(--danger-light)',
+                border: '1px solid rgba(186, 26, 26, 0.2)',
+                borderRadius: 'var(--radius-premium)',
+                padding: '1.25rem',
+                marginBottom: '1.5rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                  <span className="material-symbols-outlined" style={{ color: 'var(--danger)', fontSize: '24px' }}>warning</span>
+                  <h3 className="font-title" style={{ color: 'var(--danger-dark)', fontSize: '1.05rem', fontWeight: 800 }}>
+                    ALERTAS CRÍTICAS DE CALIDAD DETECTADAS ({globalStats.incidencias.length})
+                  </h3>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {globalStats.incidencias.map((inc: any) => (
+                    <div key={inc.id} style={{
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '0.75rem 1rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      boxShadow: '0 2px 8px rgba(186, 26, 26, 0.04)',
+                      borderLeft: '4px solid var(--danger)'
+                    }}>
+                      <div>
+                        <strong style={{ color: 'var(--text-title)' }}>{inc.apicultor_nombre}</strong>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginLeft: '0.5rem' }}>
+                          - Entrega de {inc.kilos_neto} kg ({inc.cantidad_tambores} {inc.cantidad_tambores === 1 ? 'tambor' : 'tambores'}) el {new Date(inc.fecha).toLocaleDateString('es-AR')}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.75rem' }}>
+                        {inc.humedad > 18.0 && (
+                          <span className="badge badge-danger" style={{ fontSize: '0.65rem' }}>
+                            Humedad: {inc.humedad.toFixed(1)}% (&gt;18%)
+                          </span>
+                        )}
+                        {inc.hmf > 40.0 && (
+                          <span className="badge badge-danger" style={{ fontSize: '0.65rem' }}>
+                            HMF: {inc.hmf.toFixed(1)} mg/kg (&gt;40)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Buscador y botón de creación */}
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
               <div style={{ position: 'relative', flex: 1, maxWidth: '400px' }}>
