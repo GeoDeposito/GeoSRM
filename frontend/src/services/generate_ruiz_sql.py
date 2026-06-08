@@ -116,7 +116,8 @@ for ent in entregas:
     qty_t = ent["cantidad_tambores"]
     kilos = ent["kilos_neto"]
     
-    entregas_sql += f"INSERT INTO public.ficha_entregas_miel (id, apicultor_id, fecha, color_pfund, humedad, hmf, cantidad_tambores) VALUES ({sql_val(ent_id)}, '{RUIZ_PROFILE_ID}', {sql_val(fecha)}, {sql_val(color)}, {sql_val(hum)}, {sql_val(hmf)}, {sql_val(qty_t)}) ON CONFLICT (id) DO NOTHING;\n"
+    entregas_sql += f"INSERT INTO public.ficha_entregas_miel (id, apicultor_id, fecha, color_pfund, humedad, hmf, cantidad_tambores, kilos_neto) VALUES ({sql_val(ent_id)}, '{RUIZ_PROFILE_ID}', {sql_val(fecha)}, {sql_val(color)}, {sql_val(hum)}, {sql_val(hmf)}, {sql_val(qty_t)}, {sql_val(kilos)}) ON CONFLICT (id) DO NOTHING;\n"
+
     
     if "tambores" in ent:
         for t in ent["tambores"]:

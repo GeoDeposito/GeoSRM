@@ -127,23 +127,28 @@ for ent in ruiz_data["entregas"]:
         ent["kilos_neto"] = sum(d["kilos_neto"] for d in drums_5t)
         ent["cantidad_tambores"] = len(drums_5t)
     else:
-        # Generate 1 default drum
-        default_drum = {
-            "id": get_uuid(f"t_ruiz_def_{ent['original_id']}"),
-            "entrega_id": ent["id"],
-            "nro_tambor": f"TAMB-{ent['original_id'][-4:]}",
-            "barras_ean": "18-08046134-4",
-            "lote": 12000,
-            "kilos_bruto": ent["kilos_neto"] + 17,
-            "tara": 17,
-            "kilos_neto": ent["kilos_neto"],
-            "color_pfund": ent["color_pfund"],
-            "humedad": ent["humedad"],
-            "hmf": ent["hmf"],
-            "antibiotico": "NEGATIVO",
-            "created_at": fecha
-        }
-        ent["tambores"] = [default_drum]
+        # Generate individual default drums
+        qty_d = int(ent["cantidad_tambores"])
+        avg_neto = round(ent["kilos_neto"] / qty_d, 2)
+        ent["tambores"] = []
+        for i in range(qty_d):
+            drum_id = get_uuid(f"t_ruiz_def_{ent['original_id']}_{i}")
+            ent["tambores"].append({
+                "id": drum_id,
+                "entrega_id": ent["id"],
+                "nro_tambor": f"TAMB-{ent['original_id'][-4:]}-{i+1}",
+                "barras_ean": "18-08046134-4",
+                "lote": 12000,
+                "kilos_bruto": round(avg_neto + 17, 2),
+                "tara": 17.0,
+                "kilos_neto": avg_neto,
+                "color_pfund": ent["color_pfund"],
+                "humedad": ent["humedad"],
+                "hmf": ent["hmf"],
+                "antibiotico": "NEGATIVO",
+                "created_at": fecha
+            })
+
 
 for env in ruiz_data["envases"]:
     env["id"] = get_uuid(env["id"])
