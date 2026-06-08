@@ -3,26 +3,32 @@ import { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, 
   Users, 
-  Printer, 
   Bell, 
   Key, 
   LogOut, 
   Plus, 
   ArrowLeft, 
   Search, 
-  Award,
-  Info
+  Info,
+  Menu,
+  Truck,
+  DollarSign,
+  TrendingUp,
+  ChevronRight
 } from 'lucide-react';
 import { srmService } from './services/srmService';
 import { isMockMode } from './services/supabaseClient';
 import type { Apicultor, ApicultorCompleto } from './types/srm.types';
 import './App.css';
 
+
 function App() {
   // Estados de navegación y datos
   const [apicultores, setApicultores] = useState<Apicultor[]>([]);
   const [apicultorSeleccionado, setApicultorSeleccionado] = useState<ApicultorCompleto | null>(null);
-  const [view, setView] = useState<'dashboard' | 'detail'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'directorio' | 'detail'>('dashboard');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [filtroAlerta, setFiltroAlerta] = useState(false);
   const [activeTab, setActiveTab] = useState<'general' | 'entregas' | 'envases' | 'cuenta_corriente' | 'operculo'>('general');
   const [globalStats, setGlobalStats] = useState<{
     totalKilosMiel: number;
@@ -250,9 +256,6 @@ function App() {
     }
   };
 
-  // Contar alertas globales (ej. humedad de mieles en los lotes existentes)
-  const totalIncidencias = 1; // Denis Capello tiene una entrega con 18.5% de humedad
-
   // Calcular saldo de envases de un apicultor a partir de LocalStorage
   const getSaldoEnvases = (id: string): number => {
     try {
@@ -268,41 +271,52 @@ function App() {
   };
 
   // Apicultores filtrados
-  const apicultoresFiltrados = apicultores.filter(a => 
-    a.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    a.cuit.includes(searchQuery) ||
-    (a.cod_api && a.cod_api.includes(searchQuery)) ||
-    (a.dni && a.dni.includes(searchQuery)) ||
-    (a.renapa && a.renapa.toLowerCase().includes(searchQuery.toLowerCase())) ||
-    (a.localidad && a.localidad.toLowerCase().includes(searchQuery.toLowerCase())) ||
-    (a.provincia && a.provincia.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const apicultoresFiltrados = apicultores.filter(a => {
+    const matchesSearch = 
+      a.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      a.cuit.includes(searchQuery) ||
+      (a.cod_api && a.cod_api.includes(searchQuery)) ||
+      (a.dni && a.dni.includes(searchQuery)) ||
+      (a.renapa && a.renapa.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (a.localidad && a.localidad.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (a.provincia && a.provincia.toLowerCase().includes(searchQuery.toLowerCase()));
+      
+    if (!matchesSearch) return false;
+    
+    if (filtroAlerta) {
+      const tieneIncidencia = globalStats.incidencias.some(inc => inc.apicultor_nombre === a.nombre);
+      const bajoRating = a.puntuacion < 4.5;
+      const tieneEnvases = getSaldoEnvases(a.id) > 0;
+      return tieneIncidencia || bajoRating || tieneEnvases;
+    }
+    
+    return true;
+  });
+
 
   return (
     <div className="app-container">
+      {/* Overlay del Sidebar para móviles */}
+      <div 
+        className={`sidebar-overlay ${mobileMenuOpen ? 'open' : ''}`} 
+        onClick={() => setMobileMenuOpen(false)} 
+      />
+
       {/* -------------------------------------------------------------------
           BARRA LATERAL (Sidebar)
           ------------------------------------------------------------------- */}
-      <aside style={{
-        width: '280px',
-        backgroundColor: 'var(--bg-sidebar)',
-        borderRight: '1px solid var(--border-color)',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        padding: '1.5rem 1rem'
-      }}>
+      <aside className={`sidebar-premium ${mobileMenuOpen ? 'open' : ''}`}>
         <div>
           {/* Logo y Encabezado de Geomiel */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '2rem', padding: '0.25rem 0.5rem' }}>
             <img 
               src="/logo-geomiel.png" 
-              alt="Geomiel Logo" 
+              alt="GeoMiel Logo" 
               style={{ height: '52px', width: 'auto', objectFit: 'contain', alignSelf: 'flex-start' }} 
             />
             <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem', marginTop: '0.25rem' }}>
               <span className="label-caps" style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontWeight: 700, letterSpacing: '0.12em' }}>
-                APICULTOR SRM
+                ADMIN EXECUTIVE SUITE
               </span>
             </div>
           </div>
@@ -310,7 +324,7 @@ function App() {
           {/* Menú de Navegación */}
           <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
             <button 
-              onClick={() => { setView('dashboard'); setApicultorSeleccionado(null); }}
+              onClick={() => { setView('dashboard'); setApicultorSeleccionado(null); setFiltroAlerta(false); setMobileMenuOpen(false); }}
               className="font-title"
               style={{
                 width: '100%',
@@ -329,12 +343,12 @@ function App() {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <LayoutDashboard size={18} />
-                <span>Tablero Principal</span>
+                <span>Dashboard Central</span>
               </div>
             </button>
 
             <button 
-              onClick={() => { setView('dashboard'); }}
+              onClick={() => { setView('directorio'); setApicultorSeleccionado(null); setFiltroAlerta(false); setMobileMenuOpen(false); }}
               className="font-title"
               style={{
                 width: '100%',
@@ -342,23 +356,24 @@ function App() {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 padding: '0.75rem 1rem',
-                borderRadius: view === 'detail' ? '0 var(--radius-sm) var(--radius-sm) 0' : 'var(--radius-sm)',
+                borderRadius: (view === 'directorio' && !filtroAlerta) ? '0 var(--radius-sm) var(--radius-sm) 0' : 'var(--radius-sm)',
                 fontWeight: 600,
                 fontSize: '0.9rem',
-                backgroundColor: view === 'detail' ? 'var(--bg-sidebar-active)' : 'transparent',
-                color: view === 'detail' ? 'var(--primary)' : 'var(--text-body)',
-                borderLeft: view === 'detail' ? '4px solid var(--primary)' : 'none',
+                backgroundColor: (view === 'directorio' && !filtroAlerta) ? 'var(--bg-sidebar-active)' : 'transparent',
+                color: (view === 'directorio' && !filtroAlerta) ? 'var(--primary)' : 'var(--text-body)',
+                borderLeft: (view === 'directorio' && !filtroAlerta) ? '4px solid var(--primary)' : 'none',
                 transition: 'all 0.15s ease'
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <Users size={18} />
-                <span>Fichas Apicultores</span>
+                <span>Red de Proveedores</span>
               </div>
               {apicultores.length > 0 && (
                 <span className="font-mono" style={{
                   fontSize: '0.75rem',
-                  backgroundColor: 'rgba(0,0,0,0.05)',
+                  backgroundColor: 'rgba(8,32,26,0.05)',
+                  color: 'var(--primary)',
                   padding: '0.125rem 0.5rem',
                   borderRadius: '9999px',
                   fontWeight: 700
@@ -368,18 +383,24 @@ function App() {
               )}
             </button>
 
-            <div style={{
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '0.75rem 1rem',
-              borderRadius: '12px',
-              fontWeight: 600,
-              fontSize: '0.9rem',
-              color: 'var(--text-body)',
-              opacity: 0.7
-            }}>
+            <button 
+              onClick={() => { setView('directorio'); setApicultorSeleccionado(null); setFiltroAlerta(true); setMobileMenuOpen(false); }}
+              className="font-title"
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.75rem 1rem',
+                borderRadius: (view === 'directorio' && filtroAlerta) ? '0 var(--radius-sm) var(--radius-sm) 0' : 'var(--radius-sm)',
+                fontWeight: 600,
+                fontSize: '0.9rem',
+                backgroundColor: (view === 'directorio' && filtroAlerta) ? 'var(--bg-sidebar-active)' : 'transparent',
+                color: (view === 'directorio' && filtroAlerta) ? 'var(--primary)' : 'var(--text-body)',
+                borderLeft: (view === 'directorio' && filtroAlerta) ? '4px solid var(--primary)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <Bell size={18} />
                 <span>Alertas Incumplimientos</span>
@@ -392,9 +413,9 @@ function App() {
                 borderRadius: '9999px',
                 fontWeight: 700
               }}>
-                {totalIncidencias}
+                {globalStats.incidencias.length}
               </span>
-            </div>
+            </button>
           </nav>
         </div>
 
@@ -406,19 +427,19 @@ function App() {
               width: '42px',
               height: '42px',
               borderRadius: '50%',
-              backgroundColor: '#E2E8F0',
+              backgroundColor: 'var(--primary)',
               overflow: 'hidden',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontWeight: 700,
-              color: 'var(--secondary)'
+              color: '#FFFFFF'
             }}>
-              OA
+              GM
             </div>
             <div>
-              <h4 style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-title)' }}>Operador Apícola</h4>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 500 }}>ADMINISTRADOR</span>
+              <h4 style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-title)' }}>Admin Geomiel</h4>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 500 }}>ENTERPRISE</span>
             </div>
           </div>
 
@@ -440,7 +461,7 @@ function App() {
               }}
             >
               <Key size={14} style={{ color: '#EAB308' }} />
-              Cambiar Clave
+              Clave
             </button>
             <button 
               onClick={() => alert('Sesión finalizada.')}
@@ -496,291 +517,85 @@ function App() {
           justifyContent: 'space-between',
           alignItems: 'center',
           borderBottom: '1px solid var(--border-color)',
-          paddingBottom: '1.25rem'
+          paddingBottom: '1.25rem',
+          flexWrap: 'wrap',
+          gap: '1rem'
         }}>
-          <div>
-            <h1 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', letterSpacing: '-0.02em' }}>
-              {view === 'dashboard' ? 'TABLERO DE GESTIÓN' : `FICHA PROVEEDOR: ${apicultorSeleccionado?.nombre}`}
-            </h1>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.25rem' }}>
-              {view === 'dashboard' 
-                ? 'Monitoreo en vivo de utilidades, análisis de mieles, cuenta corriente financiera y control de tambores vacíos.'
-                : 'Detalle consolidado de comportamiento, balances monetarios dobles y control analítico de calidad.'}
-            </p>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            {/* Botón menú móvil */}
+            <button 
+              className="burger-menu-btn" 
+              onClick={() => setMobileMenuOpen(true)}
+              style={{ marginRight: '0.75rem' }}
+            >
+              <Menu size={22} />
+            </button>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                <span style={{ textTransform: 'uppercase' }}>
+                  {view === 'dashboard' ? 'Finanzas' : view === 'directorio' ? 'Admin' : 'Registro'}
+                </span>
+                <ChevronRight size={12} />
+                <span style={{ textTransform: 'uppercase', color: 'var(--secondary)' }}>
+                  {view === 'dashboard' ? 'Reportes Ejecutivos' : view === 'directorio' ? 'Apicultores' : 'Detalle de Apicultor'}
+                </span>
+              </div>
+              <h1 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', letterSpacing: '-0.02em', marginTop: '0.25rem' }}>
+                {view === 'dashboard' ? 'Inteligencia Financiera' : view === 'directorio' ? 'Panel de Gestión' : 'Ficha de Apicultor'}
+              </h1>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.125rem' }}>
+                {view === 'dashboard' 
+                  ? 'Balance consolidado en tiempo real y rendimiento de ventas operativas de miel.'
+                  : view === 'directorio'
+                    ? 'Monitoreo en vivo de utilidades, análisis de mieles y control de tambores vacíos.'
+                    : 'Detalle consolidado de comportamiento, balances monetarios dobles y control analítico de calidad.'}
+              </p>
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.625rem 1.25rem',
-              border: '1px solid var(--border-color)',
-              borderRadius: '10px',
-              backgroundColor: '#FFFFFF',
-              fontSize: '0.875rem',
-              fontWeight: 600,
-              color: 'var(--text-body)'
-            }}>
-              Cuadro Financiero
-            </button>
-            <button style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.625rem 1.25rem',
-              border: '1px solid var(--border-color)',
-              borderRadius: '10px',
-              backgroundColor: '#FFFFFF',
-              fontSize: '0.875rem',
-              fontWeight: 600,
-              color: 'var(--text-secondary)'
-            }}>
-              Control de Gastos
-            </button>
-            <button 
-              onClick={() => window.print()}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.625rem 1.25rem',
-                backgroundColor: '#0EA5E9',
-                color: '#FFFFFF',
-                borderRadius: '10px',
-                fontSize: '0.875rem',
-                fontWeight: 600
-              }}
-            >
-              <Printer size={16} />
-              Imprimir Resumen
-            </button>
-          </div>
-        </header>
-
-        {/* -------------------------------------------------------------------
-            SECTOR FILTRO COMERCIAL DE FECHAS
-            ------------------------------------------------------------------- */}
-        <section className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            📅 Selector de Fecha Horizontal (Filtro Comercial Interactivo)
-          </span>
-          <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
-            {[
-              { dia: 'SÁB', num: '30', mes: 'MAY' },
-              { dia: 'DOM', num: '31', mes: 'MAY' },
-              { dia: 'LUN', num: '1', mes: 'JUN' },
-              { dia: 'MAR', num: '2', mes: 'JUN' },
-              { dia: 'MIÉ', num: '3', mes: 'JUN' },
-              { dia: 'JUE', num: '4', mes: 'JUN' },
-              { dia: 'VIE', num: '5', mes: 'JUN', activo: true },
-            ].map((d, i) => (
-              <div 
-                key={i} 
-                style={{
-                  minWidth: '75px',
-                  padding: '0.625rem',
-                  borderRadius: '12px',
-                  backgroundColor: d.activo ? 'rgba(133, 227, 68, 0.15)' : '#FAFBFD',
-                  border: d.activo ? '2px solid var(--primary)' : '1px solid var(--border-color)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  cursor: 'pointer'
-                }}
-              >
-                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-secondary)' }}>{d.dia}</span>
-                <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)', margin: '0.125rem 0' }}>{d.num}</span>
-                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-secondary)' }}>{d.mes}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* -------------------------------------------------------------------
-            VISTA 1: TABLERO / PANEL PRINCIPAL (DASHBOARD)
-            ------------------------------------------------------------------- */}
-        {view === 'dashboard' && (
-          <>
-            {/* Grid de Indicadores Globales SRM */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-              gap: '1.5rem',
-              marginBottom: '1.5rem'
-            }}>
-              {/* Card 1: Productores Activos */}
-              <div className="card-premium hex-pattern" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+            {view === 'dashboard' && (
+              <>
                 <div style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '12px',
-                  backgroundColor: 'rgba(8, 32, 26, 0.08)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--primary)'
+                  display: 'inline-flex',
+                  backgroundColor: '#ECEAE9',
+                  padding: '2px',
+                  borderRadius: '10px'
                 }}>
-                  <Users size={24} />
-                </div>
-                <div>
-                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Productores Activos</span>
-                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
-                    {apicultores.length}
-                  </span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.125rem' }}>Proveedores homologados</span>
-                </div>
-              </div>
-
-              {/* Card 2: Miel Física Acumulada */}
-              <div className="card-premium hex-pattern" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-                <div style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '12px',
-                  backgroundColor: 'rgba(125, 87, 0, 0.08)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--secondary)'
-                }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '24px', color: 'var(--secondary)' }}>science</span>
-                </div>
-                <div>
-                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Miel Física Recibida</span>
-                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
-                    {globalStats.totalKilosMiel.toLocaleString('es-AR')} kg
-                  </span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.125rem' }}>Total en depósitos</span>
-                </div>
-              </div>
-
-              {/* Card 3: Tambores en el Campo */}
-              <div className="card-premium hex-pattern" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-                <div style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '12px',
-                  backgroundColor: globalStats.totalTamboresCampo > 0 ? 'rgba(186, 26, 26, 0.08)' : 'rgba(19, 115, 51, 0.08)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: globalStats.totalTamboresCampo > 0 ? 'var(--danger)' : '#137333'
-                }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>shopping_bag</span>
-                </div>
-                <div>
-                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Envases en el Campo</span>
-                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
-                    {globalStats.totalTamboresCampo} tambores
-                  </span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.125rem' }}>Pendientes de retorno</span>
-                </div>
-              </div>
-
-              {/* Card 4: Balance de Miel Equivalente */}
-              <div className="card-premium hex-pattern" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-                <div style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '12px',
-                  backgroundColor: globalStats.totalMielEquivSaldo >= 0 ? 'rgba(19, 115, 51, 0.08)' : 'rgba(186, 26, 26, 0.08)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: globalStats.totalMielEquivSaldo >= 0 ? '#137333' : 'var(--danger)'
-                }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>balance</span>
-                </div>
-                <div>
-                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Balance Miel Equivalente</span>
-                  <span style={{ 
-                    fontSize: '1.75rem', 
-                    fontWeight: 800, 
-                    color: globalStats.totalMielEquivSaldo >= 0 ? '#137333' : 'var(--danger)', 
-                    fontFamily: 'var(--font-title)' 
-                  }}>
-                    {globalStats.totalMielEquivSaldo.toLocaleString('es-AR')} kg
-                  </span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.125rem' }}>
-                    {globalStats.totalMielEquivSaldo >= 0 ? 'Excedente a favor' : 'Deuda de apicultores'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Panel de Alertas Críticas de Calidad (Humedad > 18% o HMF > 40) */}
-            {globalStats.incidencias.length > 0 && (
-              <div style={{
-                backgroundColor: 'var(--danger-light)',
-                border: '1px solid rgba(186, 26, 26, 0.2)',
-                borderRadius: 'var(--radius-premium)',
-                padding: '1.25rem',
-                marginBottom: '1.5rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                  <span className="material-symbols-outlined" style={{ color: 'var(--danger)', fontSize: '24px' }}>warning</span>
-                  <h3 className="font-title" style={{ color: 'var(--danger-dark)', fontSize: '1.05rem', fontWeight: 800 }}>
-                    ALERTAS CRÍTICAS DE CALIDAD DETECTADAS ({globalStats.incidencias.length})
-                  </h3>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {globalStats.incidencias.map((inc: any) => (
-                    <div key={inc.id} style={{
-                      backgroundColor: '#FFFFFF',
-                      borderRadius: 'var(--radius-sm)',
-                      padding: '0.75rem 1rem',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      boxShadow: '0 2px 8px rgba(186, 26, 26, 0.04)',
-                      borderLeft: '4px solid var(--danger)'
-                    }}>
-                      <div>
-                        <strong style={{ color: 'var(--text-title)' }}>{inc.apicultor_nombre}</strong>
-                        <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginLeft: '0.5rem' }}>
-                          - Entrega de {inc.kilos_neto} kg ({inc.cantidad_tambores} {inc.cantidad_tambores === 1 ? 'tambor' : 'tambores'}) el {new Date(inc.fecha).toLocaleDateString('es-AR')}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.75rem' }}>
-                        {inc.humedad > 18.0 && (
-                          <span className="badge badge-danger" style={{ fontSize: '0.65rem' }}>
-                            Humedad: {inc.humedad.toFixed(1)}% (&gt;18%)
-                          </span>
-                        )}
-                        {inc.hmf > 40.0 && (
-                          <span className="badge badge-danger" style={{ fontSize: '0.65rem' }}>
-                            HMF: {inc.hmf.toFixed(1)} mg/kg (&gt;40)
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                  {['Mensual', 'Trimestral', 'Anual'].map((opt) => (
+                    <button 
+                      key={opt}
+                      style={{
+                        padding: '0.5rem 1rem',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        borderRadius: '8px',
+                        backgroundColor: opt === 'Mensual' ? '#FFFFFF' : 'transparent',
+                        color: opt === 'Mensual' ? 'var(--text-title)' : 'var(--text-secondary)',
+                        boxShadow: opt === 'Mensual' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none'
+                      }}
+                    >
+                      {opt}
+                    </button>
                   ))}
                 </div>
-              </div>
+                <button style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.625rem 1.25rem',
+                  backgroundColor: 'var(--secondary)',
+                  color: '#FFFFFF',
+                  borderRadius: '10px',
+                  fontSize: '0.875rem',
+                  fontWeight: 600
+                }}>
+                  Exportar Reporte
+                </button>
+              </>
             )}
-
-            {/* Buscador y botón de creación */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
-              <div style={{ position: 'relative', flex: 1, maxWidth: '400px' }}>
-                <Search size={18} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-secondary)' }} />
-                <input 
-                  type="text" 
-                  placeholder="Buscar por nombre, CUIT o localidad..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '0.625rem 0.625rem 0.625rem 2.5rem',
-                    borderRadius: '10px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: '#FFFFFF',
-                    outline: 'none',
-                    fontSize: '0.9rem'
-                  }}
-                />
-              </div>
-
+            
+            {view === 'directorio' && (
               <button 
                 onClick={() => setShowAddApicultor(true)}
                 style={{
@@ -798,72 +613,636 @@ function App() {
                 <Plus size={18} style={{ color: '#FFFFFF' }} />
                 Registrar Apicultor
               </button>
+            )}
+
+            {view === 'detail' && apicultorSeleccionado && (
+              <>
+                <button 
+                  onClick={() => window.print()}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.625rem 1.25rem',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: '#FFFFFF',
+                    borderRadius: '10px',
+                    fontSize: '0.875rem',
+                    fontWeight: 600,
+                    color: 'var(--text-secondary)'
+                  }}
+                >
+                  Exportar PDF
+                </button>
+                <button 
+                  onClick={() => {
+                    alert('Editar Perfil disponible en producción.');
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.625rem 1.25rem',
+                    backgroundColor: 'var(--secondary)',
+                    color: '#FFFFFF',
+                    borderRadius: '10px',
+                    fontSize: '0.875rem',
+                    fontWeight: 600
+                  }}
+                >
+                  Editar Perfil
+                </button>
+              </>
+            )}
+          </div>
+        </header>
+
+        {/* -------------------------------------------------------------------
+            VISTA 1: TABLERO / PANEL PRINCIPAL (DASHBOARD)
+            ------------------------------------------------------------------- */}
+        {/* -------------------------------------------------------------------
+            VISTA 1: DASHBOARD CENTRAL (INTELIGENCIA FINANCIERA)
+            ------------------------------------------------------------------- */}
+        {view === 'dashboard' && (
+          <div className="dashboard-grid">
+            {/* Columna Principal Izquierda */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              
+              {/* Tarjetas KPI de Inteligencia Financiera */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '1rem'
+              }}>
+                <div className="card-premium hex-pattern" style={{ padding: '1.25rem' }}>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Ventas Totales</span>
+                  <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>$142,500.00</h2>
+                  <span style={{ fontSize: '0.75rem', color: '#137333', fontWeight: 700 }}>↗ +12.5% vs mes anterior</span>
+                </div>
+                <div className="card-premium hex-pattern" style={{ padding: '1.25rem' }}>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Gastos Operativos</span>
+                  <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>$38,200.00</h2>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--danger)', fontWeight: 700 }}>↗ +4.2% vs presupuestado</span>
+                </div>
+                <div className="card-premium hex-pattern" style={{ padding: '1.25rem' }}>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Utilidad Neta</span>
+                  <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>$104,300.00</h2>
+                  <span style={{ fontSize: '0.75rem', color: '#137333', fontWeight: 700 }}>↗ +15.1% margen neto</span>
+                </div>
+                <div className="card-premium hex-pattern" style={{ padding: '1.25rem' }}>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Precio Promedio/Ton</span>
+                  <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>$4,850.00</h2>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Estable en el mercado global</span>
+                </div>
+              </div>
+
+              {/* Gráficos de Desempeño */}
+              <div className="charts-grid">
+                
+                {/* Gráfico Ventas vs Gastos */}
+                <div className="card-premium">
+                  <h3 className="font-title" style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-title)', marginBottom: '0.5rem' }}>Ventas vs. Gastos</h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>Comparativa de ingresos y costos operativos mensuales en dólares.</p>
+                  
+                  <div className="bar-chart-container">
+                    <div className="bar-chart-y-axis">
+                      {/* Grid Lines */}
+                      <div className="bar-chart-grid-line" style={{ bottom: '75%' }}></div>
+                      <div className="bar-chart-grid-line" style={{ bottom: '50%' }}></div>
+                      <div className="bar-chart-grid-line" style={{ bottom: '25%' }}></div>
+                      
+                      {[
+                        { mes: 'Jun', ing: 110, cos: 35 },
+                        { mes: 'Jul', ing: 135, cos: 45 },
+                        { mes: 'Ago', ing: 160, cos: 50 },
+                        { mes: 'Sep', ing: 185, cos: 55 },
+                        { mes: 'Oct', ing: 155, cos: 40 },
+                      ].map((m, idx) => (
+                        <div key={idx} className="bar-chart-month-group">
+                          <div className="bar-chart-bars">
+                            <div 
+                              className="bar-chart-bar bar-chart-bar-ingresos" 
+                              style={{ height: `${(m.ing / 200) * 100}%` }}
+                              data-val={`$${m.ing}k`}
+                            />
+                            <div 
+                              className="bar-chart-bar bar-chart-bar-costos" 
+                              style={{ height: `${(m.cos / 200) * 100}%` }}
+                              data-val={`$${m.cos}k`}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="bar-chart-x-axis">
+                      <span>Jun</span>
+                      <span>Jul</span>
+                      <span>Ago</span>
+                      <span>Sep</span>
+                      <span>Oct</span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem', justifyContent: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', fontWeight: 600 }}>
+                      <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: 'var(--secondary)' }}></div>
+                      <span>Ingresos</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', fontWeight: 600 }}>
+                      <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: '#5C6F68' }}></div>
+                      <span>Gastos</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Distribución por Tipo de Miel */}
+                <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div>
+                    <h3 className="font-title" style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-title)', marginBottom: '0.5rem' }}>Distribución por Tipo</h3>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Porcentaje del stock de miel física en depósito según floración.</p>
+                  </div>
+                  
+                  <div className="donut-chart-wrapper">
+                    {/* SVG Donut */}
+                    <div style={{ position: 'relative', width: '120px', height: '120px', flexShrink: 0 }}>
+                      <svg width="120" height="120" viewBox="0 0 42 42" className="donut">
+                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#EFEDED" strokeWidth="4.5"></circle>
+                        {/* Multiflora 65% (stroke-dasharray: 65 35, stroke-dashoffset: 25) */}
+                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--secondary)" strokeWidth="4.5" strokeDasharray="65 35" strokeDashoffset="25"></circle>
+                        {/* Eucalipto 25% (stroke-dasharray: 25 75, stroke-dashoffset: 60) */}
+                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--primary)" strokeWidth="4.5" strokeDasharray="25 75" strokeDashoffset="60"></circle>
+                        {/* Azahar 10% (stroke-dasharray: 10 90, stroke-dashoffset: 35) */}
+                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--secondary-container)" strokeWidth="4.5" strokeDasharray="10 90" strokeDashoffset="35"></circle>
+                      </svg>
+                      <div style={{
+                        position: 'absolute',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                        lineHeight: 1
+                      }}>
+                        <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)' }}>28.4k</span>
+                        <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', fontWeight: 700, marginTop: '2px' }}>KILOS</span>
+                      </div>
+                    </div>
+
+                    <div className="donut-chart-legend">
+                      <div className="donut-legend-item">
+                        <span><span className="donut-legend-color" style={{ backgroundColor: 'var(--secondary)' }}></span>Multiflora</span>
+                        <strong className="font-mono">65%</strong>
+                      </div>
+                      <div className="donut-legend-item">
+                        <span><span className="donut-legend-color" style={{ backgroundColor: 'var(--primary)' }}></span>Eucalipto</span>
+                        <strong className="font-mono">25%</strong>
+                      </div>
+                      <div className="donut-legend-item">
+                        <span><span className="donut-legend-color" style={{ backgroundColor: 'var(--secondary-container)' }}></span>Azahar</span>
+                        <strong className="font-mono">10%</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Transacciones Globales Recientes */}
+              <section className="card-premium">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                  <h3 className="font-title" style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-title)' }}>
+                    Transacciones Globales Recientes
+                  </h3>
+                  <span className="badge badge-info">En Vivo</span>
+                </div>
+
+                <div className="table-container">
+                  <table className="table-premium">
+                    <thead>
+                      <tr>
+                        <th className="font-title">ID REF</th>
+                        <th className="font-title">BENEFICIARIO / CLIENTE</th>
+                        <th className="font-title">TIPO</th>
+                        <th className="font-title">MÉTODO</th>
+                        <th className="font-title">ESTADO</th>
+                        <th className="font-title text-right">MONTO</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        { id: 'TXN-9021', name: 'Exportadora del Sur', desc: 'Mercado Internacional', tipo: 'VENTA', met: 'Transferencia SWIFT', est: 'Completado', mon: 35000 },
+                        { id: 'TXN-8984', name: 'Logística Abeja Real', desc: 'Flete Terrestre Carga', tipo: 'GASTO', met: 'Tarjeta Corp.', est: 'En Proceso', mon: 4200 },
+                        { id: 'TXN-8952', name: 'Suministros Apícolas S.A.', desc: 'Insumos de Extracción', tipo: 'SUMINISTRO', met: 'Crédito Directo', est: 'Completado', mon: 12800 },
+                        { id: 'TXN-8931', name: 'Distribuidora Naturalis', desc: 'Retail National Packs', tipo: 'VENTA', met: 'Pago en Línea', est: 'Completado', mon: 22500 }
+                      ].map((tx) => (
+                        <tr key={tx.id} className="table-row-hover">
+                          <td className="font-mono" style={{ color: 'var(--text-secondary)' }}>{tx.id}</td>
+                          <td>
+                            <strong style={{ display: 'block', color: 'var(--text-title)' }}>{tx.name}</strong>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{tx.desc}</span>
+                          </td>
+                          <td>
+                            <span className={`badge ${tx.tipo === 'VENTA' ? 'badge-success' : tx.tipo === 'GASTO' ? 'badge-danger' : 'badge-amber'}`}>
+                              {tx.tipo}
+                            </span>
+                          </td>
+                          <td style={{ color: 'var(--text-secondary)' }}>{tx.met}</td>
+                          <td>
+                            <span className={`badge ${tx.est === 'Completado' ? 'badge-success' : 'badge-amber'}`}>
+                              {tx.est}
+                            </span>
+                          </td>
+                          <td className="font-mono text-right" style={{ fontWeight: 700, color: tx.tipo === 'VENTA' ? '#137333' : 'var(--text-title)' }}>
+                            {tx.tipo === 'VENTA' ? '+' : '-'}${tx.mon.toLocaleString('es-AR')}.00
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+            </div>
+
+            {/* Columna Lateral Derecha (Sidebar Ejecutivo) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              
+              {/* Perspectiva de Cosecha Q4 */}
+              <div className="card-premium" style={{
+                backgroundColor: 'var(--primary-container)',
+                color: '#FFFFFF',
+                border: 'none',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1rem',
+                backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'28\' height=\'49\' viewBox=\'0 0 28 49\'%3E%3Cpath fill=\'%23ffffff\' fill-opacity=\'0.03\' d=\'M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.91v12.18l10.99 6.34 11-6.34V17.91l-11-6.34L3 17.91z\'/%3E%3C/svg%3E")'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <TrendingUp size={20} style={{ color: 'var(--secondary-container)' }} />
+                  <span className="label-caps" style={{ color: 'var(--secondary-container)', fontSize: '0.65rem' }}>Proyección de Cosecha</span>
+                </div>
+                <h3 className="font-title" style={{ fontSize: '1.4rem', fontWeight: 800, lineHeight: 1.2 }}>
+                  Perspectiva de Cosecha Q4
+                </h3>
+                <p style={{ fontSize: '0.85rem', color: '#B3C4BF', lineHeight: 1.4 }}>
+                  Se espera un alto rendimiento para las variedades de Eucalipto basado en los informes biométricos y climáticos actuales de la región.
+                </p>
+                <button 
+                  onClick={() => alert('Descargando modelo predictivo Q4.')}
+                  style={{
+                    backgroundColor: 'var(--secondary-container)',
+                    color: 'var(--primary)',
+                    padding: '0.75rem 1rem',
+                    borderRadius: '10px',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    textAlign: 'center',
+                    marginTop: '0.5rem'
+                  }}
+                >
+                  Descargar Modelo Predictivo
+                </button>
+              </div>
+
+              {/* Alertas SRM e Incumplimientos */}
+              <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+                  <Bell size={18} style={{ color: 'var(--danger)' }} />
+                  <h4 className="font-title" style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-title)' }}>Alertas de Control</h4>
+                </div>
+
+                {/* Alerta Presupuesto */}
+                <div style={{
+                  backgroundColor: 'var(--danger-light)',
+                  border: '1px solid rgba(186, 26, 26, 0.1)',
+                  borderRadius: '12px',
+                  padding: '0.875rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.25rem'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong style={{ fontSize: '0.75rem', color: 'var(--danger-dark)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Alerta de Presupuesto</strong>
+                    <span style={{ fontSize: '0.65rem', backgroundColor: '#F87171', color: '#FFFFFF', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>CRÍTICO</span>
+                  </div>
+                  <strong style={{ fontSize: '0.8rem', color: 'var(--text-title)', marginTop: '0.25rem' }}>EXCESO DE PRESUPUESTO</strong>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.3 }}>
+                    El gasto en Logística excedió el límite proyectado para Octubre (+15%). Requiere revisión del CFO.
+                  </p>
+                </div>
+
+                {/* Alerta Cobro Pendiente */}
+                <div style={{
+                  backgroundColor: '#FFFBEB',
+                  border: '1px solid rgba(217, 119, 6, 0.1)',
+                  borderRadius: '12px',
+                  padding: '0.875rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.25rem'
+                }}>
+                  <strong style={{ fontSize: '0.75rem', color: '#B45309', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Cobro Pendiente</strong>
+                  <strong style={{ fontSize: '0.8rem', color: 'var(--text-title)', marginTop: '0.25rem' }}>EXPORTADORA DEL SUR</strong>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.3 }}>
+                    Pago de $12.4k programado para procesamiento automático el 15/10.
+                  </p>
+                </div>
+
+                {/* Alertas dinámicas de apicultores (incidencias de calidad) */}
+                {globalStats.incidencias.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
+                    <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Calidad de Proveedores</span>
+                    {globalStats.incidencias.map((inc) => (
+                      <div 
+                        key={inc.id} 
+                        onClick={() => {
+                          setView('directorio');
+                          setFiltroAlerta(true);
+                        }}
+                        style={{
+                          backgroundColor: '#FFF5F5',
+                          borderLeft: '3px solid var(--danger)',
+                          borderRadius: '8px',
+                          padding: '0.5rem 0.75rem',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <div>
+                          <strong style={{ fontSize: '0.75rem', color: 'var(--text-title)', display: 'block' }}>{inc.apicultor_nombre}</strong>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Humedad: {inc.humedad}%</span>
+                        </div>
+                        <ChevronRight size={14} style={{ color: 'var(--text-secondary)' }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Directrices de Gobernanza */}
+              <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <h4 className="font-title" style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-title)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+                  Directrices de Gobernanza
+                </h4>
+                <ul style={{
+                  paddingLeft: '1.25rem',
+                  fontSize: '0.8rem',
+                  color: 'var(--text-secondary)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem',
+                  lineHeight: 1.4
+                }}>
+                  <li>Mantener la liquidez operativa por encima del 15% del total auditado.</li>
+                  <li>Auditoría externa trimestral mandatoria de todas las cuentas de apicultores.</li>
+                  <li>Exigir reporte RENAPA actualizado para liquidaciones mayores a $10k USD.</li>
+                </ul>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* -------------------------------------------------------------------
+            VISTA 2: DIRECTORIO DE APICULTORES (RED DE PROVEEDORES)
+            ------------------------------------------------------------------- */}
+        {view === 'directorio' && (
+          <>
+            {/* Tarjetas KPI del Directorio */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '1.5rem',
+              marginBottom: '1.5rem'
+            }}>
+              <div className="card-premium hex-pattern" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                <div style={{
+                  width: '48px', height: '48px', borderRadius: '12px',
+                  backgroundColor: 'rgba(8, 32, 26, 0.08)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary)'
+                }}>
+                  <Users size={24} />
+                </div>
+                <div>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Total Apicultores</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>1,284</span>
+                  <span style={{ fontSize: '0.75rem', color: '#137333', fontWeight: 700 }}>↗ +12% vs mes anterior</span>
+                </div>
+              </div>
+
+              <div className="card-premium hex-pattern" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                <div style={{
+                  width: '48px', height: '48px', borderRadius: '12px',
+                  backgroundColor: 'rgba(19, 115, 51, 0.08)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#137333'
+                }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>verified_user</span>
+                </div>
+                <div>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Tasa de Verificación</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>98.2%</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>1,261 apicultores validados</span>
+                </div>
+              </div>
+
+              <div className="card-premium hex-pattern" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                <div style={{
+                  width: '48px', height: '48px', borderRadius: '12px',
+                  backgroundColor: 'rgba(125, 87, 0, 0.08)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--secondary)'
+                }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>star</span>
+                </div>
+                <div>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Rating Global</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>4.85</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Basado en 500 entregas</span>
+                </div>
+              </div>
+
+              <div className="card-premium hex-pattern" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                <div style={{
+                  width: '48px', height: '48px', borderRadius: '12px',
+                  backgroundColor: 'rgba(8, 32, 26, 0.08)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary)'
+                }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>hive</span>
+                </div>
+                <div>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Apiarios Activos</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>4,512</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>En producción actual</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Buscador, Filtros y Herramientas */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '1rem',
+              flexWrap: 'wrap',
+              marginBottom: '1rem'
+            }}>
+              {/* Tabs de Filtro Rápido */}
+              <div style={{
+                display: 'inline-flex',
+                backgroundColor: '#ECEAE9',
+                padding: '3px',
+                borderRadius: '10px'
+              }}>
+                <button 
+                  onClick={() => setFiltroAlerta(false)}
+                  style={{
+                    padding: '0.5rem 1.25rem', fontSize: '0.85rem', fontWeight: 700, borderRadius: '8px',
+                    backgroundColor: !filtroAlerta ? 'var(--secondary)' : 'transparent',
+                    color: !filtroAlerta ? '#FFFFFF' : 'var(--text-secondary)',
+                    boxShadow: !filtroAlerta ? '0 2px 4px rgba(0,0,0,0.1)' : 'none'
+                  }}
+                >
+                  Todos
+                </button>
+                <button 
+                  onClick={() => setFiltroAlerta(true)}
+                  style={{
+                    padding: '0.5rem 1.25rem', fontSize: '0.85rem', fontWeight: 700, borderRadius: '8px',
+                    backgroundColor: filtroAlerta ? 'var(--secondary)' : 'transparent',
+                    color: filtroAlerta ? '#FFFFFF' : 'var(--text-secondary)',
+                    boxShadow: filtroAlerta ? '0 2px 4px rgba(0,0,0,0.1)' : 'none'
+                  }}
+                >
+                  En Revisión / Alerta ({globalStats.incidencias.length})
+                </button>
+              </div>
+
+              {/* Buscador Integrado */}
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flex: 1, maxWidth: '450px', minWidth: '280px' }}>
+                <div style={{ position: 'relative', flex: 1 }}>
+                  <Search size={18} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-secondary)' }} />
+                  <input 
+                    type="text" 
+                    placeholder="Buscar por nombre, CUIT, RENAPA o localidad..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '0.625rem 0.625rem 0.625rem 2.5rem',
+                      borderRadius: '10px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: '#FFFFFF',
+                      outline: 'none',
+                      fontSize: '0.9rem'
+                    }}
+                  />
+                </div>
+                <button 
+                  onClick={() => alert('Exportando listado de apicultores a CSV.')}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.375rem',
+                    padding: '0.625rem 1rem',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '10px',
+                    backgroundColor: '#FFFFFF',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    color: 'var(--text-secondary)',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  Exportar CSV
+                </button>
+              </div>
             </div>
 
             {/* Listado de Apicultores */}
             <section className="card-premium">
               <h3 className="font-title" style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: '1.25rem', color: 'var(--text-title)' }}>
-                Directorio y Fichas 360° de Proveedores
+                Directorio y Fichas de Control de Productores
               </h3>
 
               <div className="table-container">
                 <table className="table-premium">
                   <thead>
                     <tr>
-                      <th className="font-title">Apicultor / Razón Social</th>
-                      <th className="font-title">Código API</th>
-                      <th className="font-title">CUIT</th>
-                      <th className="font-title">RENAPA</th>
+                      <th className="font-title">Apicultor</th>
+                      <th className="font-title">Identificación (CUIT)</th>
                       <th className="font-title">Ubicación</th>
+                      <th className="font-title">Apiarios</th>
                       <th className="font-title">Rating</th>
-                      <th className="font-title">Tambores en Campo</th>
+                      <th className="font-title">Estado</th>
                       <th className="font-title text-right">Acción</th>
                     </tr>
                   </thead>
                   <tbody>
                     {apicultoresFiltrados.length === 0 ? (
                       <tr>
-                        <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2.5rem' }}>
+                        <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2.5rem' }}>
                           No se encontraron apicultores registrados.
                         </td>
                       </tr>
                     ) : (
                       apicultoresFiltrados.map((a) => {
-                        // Calcular saldo de envases dinámicamente
-                        const saldoEnvases = getSaldoEnvases(a.id);
+                        const tieneIncidencia = globalStats.incidencias.some(inc => inc.apicultor_nombre === a.nombre);
+                        const apiariosCount = Math.floor((a.nombre.length * 7) % 15) + 3; // Mock apiarios count
+                        
+                        let estadoBadge = <span className="badge badge-success">Activo</span>;
+                        if (tieneIncidencia || a.puntuacion < 4.5) {
+                          estadoBadge = <span className="badge badge-danger">En Revisión</span>;
+                        } else if (a.puntuacion < 3.8) {
+                          estadoBadge = <span className="badge badge-danger">Inactivo</span>;
+                        }
 
                         return (
                           <tr key={a.id} className="table-row-hover">
-                            <td style={{ fontWeight: 700, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>{a.nombre}</td>
-                            <td className="font-mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>{a.cod_api || '-'}</td>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                <div style={{
+                                  width: '38px', height: '38px', borderRadius: '50%',
+                                  backgroundColor: tieneIncidencia ? 'rgba(186, 26, 26, 0.08)' : 'rgba(8, 32, 26, 0.08)',
+                                  color: tieneIncidencia ? 'var(--danger)' : 'var(--primary)',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  fontWeight: 800, fontSize: '0.85rem'
+                                }}>
+                                  {a.nombre.split(' ').map((n: string) => n[0]).join('').slice(0,2).toUpperCase()}
+                                </div>
+                                <div>
+                                  <strong style={{ display: 'block', color: 'var(--text-title)' }}>{a.nombre}</strong>
+                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{a.nombre.toLowerCase().replace(/ /g, '') + '@geomiel.com'}</span>
+                                </div>
+                              </div>
+                            </td>
                             <td className="font-mono">{a.cuit}</td>
-                            <td className="font-mono" style={{ textTransform: 'uppercase', color: 'var(--text-secondary)' }}>{a.renapa || '-'}</td>
-                            <td>{a.localidad ? `${a.localidad}${a.provincia ? `, ${a.provincia}` : ''}` : 'No declarada'}</td>
+                            <td>{a.localidad ? `${a.localidad}, ${a.provincia || 'Ubicación'}` : 'No declarada'}</td>
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                <Award size={16} style={{ color: 'var(--primary)' }} />
-                                <span className="font-mono" style={{ fontWeight: 700 }}>{a.puntuacion.toFixed(1)}</span>
+                                <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--text-secondary)' }}>hive</span>
+                                <strong className="font-mono">{apiariosCount}</strong>
                               </div>
                             </td>
                             <td>
-                              <span className={`badge ${saldoEnvases > 0 ? 'badge-danger' : 'badge-success'}`}>
-                                {saldoEnvases} en campo
-                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <span className="material-symbols-outlined" style={{ color: 'var(--secondary)', fontSize: '18px' }}>star</span>
+                                <span className="font-mono" style={{ fontWeight: 700 }}>{a.puntuacion.toFixed(1)}</span>
+                              </div>
                             </td>
+                            <td>{estadoBadge}</td>
                             <td style={{ textAlign: 'right' }}>
                               <button 
                                 onClick={() => seleccionarApicultor(a.id)}
+                                className="font-title"
                                 style={{
-                                  padding: '0.5rem 1rem',
+                                  padding: '0.5rem 1.25rem',
                                   borderRadius: 'var(--radius-sm)',
-                                  backgroundColor: 'var(--bg-sidebar-active)',
-                                  color: 'var(--primary)',
+                                  backgroundColor: 'var(--secondary)',
+                                  color: '#FFFFFF',
                                   fontWeight: 700,
                                   fontSize: '0.8rem',
-                                  border: '1px solid var(--border-color)'
                                 }}
                               >
-                                Ver Radiografía 360°
+                                DETALLES
                               </button>
                             </td>
                           </tr>
@@ -878,14 +1257,14 @@ function App() {
         )}
 
         {/* -------------------------------------------------------------------
-            VISTA 2: RADICACIÓN / RADIOGRAFÍA 360° DETALLE
+            VISTA 3: FICHA DE APICULTOR (DETALLE 360°)
             ------------------------------------------------------------------- */}
         {view === 'detail' && apicultorSeleccionado && (
           <>
             {/* Botón de Retorno */}
-            <div>
+            <div style={{ marginBottom: '1rem' }}>
               <button 
-                onClick={() => { setView('dashboard'); setApicultorSeleccionado(null); }}
+                onClick={() => { setView('directorio'); setApicultorSeleccionado(null); }}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -897,663 +1276,560 @@ function App() {
                 }}
               >
                 <ArrowLeft size={16} />
-                Volver al Tablero Principal
+                Volver al Directorio de Proveedores
               </button>
             </div>
 
-            {/* KPI Cards del Apicultor en Foco */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-              gap: '1.25rem'
-            }}>
-              {/* Prestados / Campo (Progreso circular simulado) */}
-              <div className="card-premium" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                    Envases en Campo
-                  </span>
-                  <h2 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', marginTop: '0.25rem' }}>
-                    {apicultorSeleccionado.stats.saldo_envases} <span style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--text-secondary)' }}>tambores</span>
-                  </h2>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Saldo pendiente en campo</span>
-                </div>
-                {/* Indicador circular CSS SVG */}
-                <div style={{ position: 'relative', width: '60px', height: '60px' }}>
-                  <svg width="60" height="60" viewBox="0 0 36 36">
-                    <path
-                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      fill="none"
-                      stroke="#E2E8F0"
-                      strokeWidth="3.5"
-                    />
-                    <path
-                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      fill="none"
-                      stroke={apicultorSeleccionado.stats.saldo_envases > 0 ? "var(--danger)" : "var(--primary-dark)"}
-                      strokeWidth="3.5"
-                      strokeDasharray={`${Math.min(100, Math.max(0, apicultorSeleccionado.stats.saldo_envases * 5))}, 100`}
-                    />
-                  </svg>
-                  <div style={{
-                    position: 'absolute',
-                    top: 0, left: 0, right: 0, bottom: 0,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '0.8rem', fontWeight: 700
-                  }}>
-                    {apicultorSeleccionado.stats.saldo_envases > 0 ? 'alert' : 'ok'}
-                  </div>
-                </div>
-              </div>
-
-              {/* Miel Entregada */}
-              <div className="card-premium">
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                  Miel Física Entregada
-                </span>
-                <h2 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', marginTop: '0.25rem' }}>
-                  {apicultorSeleccionado.stats.entregas_totales_kilos.toLocaleString()} <span style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--text-secondary)' }}>kg netos</span>
-                </h2>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                    Total: {apicultorSeleccionado.stats.entregas_totales_tambores} tambores llenos
-                  </span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--secondary)', fontWeight: 700 }}>100% OK</span>
-                </div>
-              </div>
-
-              {/* Saldo Miel Equivalente (Unificado) */}
-              <div className="card-premium" style={{ borderLeft: '4px solid var(--primary)' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                  Saldo Miel Equivalente (Total)
-                </span>
-                <h2 style={{ 
-                  fontSize: '1.75rem', 
-                  fontWeight: 800, 
-                  color: apicultorSeleccionado.stats.saldo_miel_equivalente >= 0 ? 'var(--primary-dark)' : 'var(--danger)', 
-                  marginTop: '0.25rem' 
-                }}>
-                  {apicultorSeleccionado.stats.saldo_miel_equivalente >= 0 ? '+' : ''}
-                  {apicultorSeleccionado.stats.saldo_miel_equivalente.toFixed(2).toLocaleString()} <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>kg</span>
-                </h2>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  {apicultorSeleccionado.stats.saldo_miel_equivalente >= 0 ? 'Miel a favor en depósito' : 'Deuda convertida a miel'}
-                </span>
-              </div>
-
-              {/* Saldo Opérculo */}
-              <div className="card-premium" style={{ borderLeft: '4px solid var(--secondary)' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                  Saldo Opérculo (OP)
-                </span>
-                <h2 style={{ 
-                  fontSize: '1.75rem', 
-                  fontWeight: 800, 
-                  color: apicultorSeleccionado.stats.saldo_operculo >= 0 ? 'var(--secondary)' : 'var(--danger)', 
-                  marginTop: '0.25rem' 
-                }}>
-                  {apicultorSeleccionado.stats.saldo_operculo >= 0 ? '+' : ''}
-                  {apicultorSeleccionado.stats.saldo_operculo.toFixed(1).toLocaleString()} <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>kg</span>
-                </h2>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  Saldo secundario de cappings/cera
-                </span>
-              </div>
-
-              {/* Cuenta Corriente ARS */}
-              <div className="card-premium">
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                  Saldo Financiero ARS
-                </span>
-                <h2 style={{ 
-                  fontSize: '1.75rem', 
-                  fontWeight: 800, 
-                  color: apicultorSeleccionado.stats.saldo_financiero_ars >= 0 ? 'var(--secondary)' : 'var(--danger)', 
-                  marginTop: '0.25rem' 
-                }}>
-                  {apicultorSeleccionado.stats.saldo_financiero_ars >= 0 ? '+' : ''}
-                  ${apicultorSeleccionado.stats.saldo_financiero_ars.toLocaleString()}
-                </h2>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  {apicultorSeleccionado.stats.saldo_financiero_ars >= 0 ? 'Saldo a favor (pesos)' : 'Deuda en pesos'}
-                </span>
-              </div>
-
-              {/* Cuenta Corriente USD */}
-              <div className="card-premium" style={{ borderLeft: '4px solid #F59E0B' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                  Saldo Financiero USD
-                </span>
-                <h2 style={{ 
-                  fontSize: '1.75rem', 
-                  fontWeight: 800, 
-                  color: apicultorSeleccionado.stats.saldo_financiero_usd >= 0 ? 'var(--secondary)' : 'var(--danger)', 
-                  marginTop: '0.25rem' 
-                }}>
-                  {apicultorSeleccionado.stats.saldo_financiero_usd >= 0 ? '+' : ''}
-                  USD {apicultorSeleccionado.stats.saldo_financiero_usd.toLocaleString()}
-                </h2>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  {apicultorSeleccionado.stats.saldo_financiero_usd >= 0 ? 'Saldo a favor (USD)' : 'Deuda en dólares'}
-                </span>
-              </div>
-            </div>
-
-            {/* Pestañas de detalle */}
-            <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', gap: '1rem', marginTop: '1rem', overflowX: 'auto' }}>
-              {[
-                { id: 'general', label: 'Datos Generales' },
-                { id: 'entregas', label: `Análisis de Miel (${apicultorSeleccionado.entregas.length})` },
-                { id: 'envases', label: 'Control de Envases' },
-                { id: 'cuenta_corriente', label: 'Cuenta Corriente / Miel Equiv.' },
-                { id: 'operculo', label: `Control de Opérculo (${apicultorSeleccionado.operculo?.length || 0})` }
-              ].map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setActiveTab(t.id as any)}
-                  style={{
-                    padding: '0.75rem 0.5rem',
-                    fontWeight: 700,
-                    fontSize: '0.9rem',
-                    whiteSpace: 'nowrap',
-                    color: activeTab === t.id ? 'var(--secondary)' : 'var(--text-secondary)',
-                    borderBottom: activeTab === t.id ? '3px solid var(--secondary)' : 'none',
-                    marginBottom: '-2px'
-                  }}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            {/* -----------------------------------------------------------------
-                PESTAÑA: GENERAL
-                ----------------------------------------------------------------- */}
-            {activeTab === 'general' && (
-              <section className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                <h3 className="font-title" style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)' }}>
-                  Ficha Impositiva y Datos de Contacto
-                </h3>
+            <div className="ficha-grid">
+              
+              {/* Columna Izquierda: Perfil y Apiarios */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-                  {/* Bloque 1: Identificación Comercial */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', paddingRight: '1rem', borderRight: '1px solid var(--border-color)' }}>
-                    <h4 className="font-title" style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--primary)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem', marginBottom: '0.25rem' }}>
-                      Identificación Comercial
-                    </h4>
-                    <div>
-                      <label className="label-caps">Código de Apicultor (API)</label>
-                      <p className="font-mono" style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', marginTop: '0.25rem' }}>{apicultorSeleccionado.cod_api || 'No asignado'}</p>
-                    </div>
-                    <div>
-                      <label className="label-caps">CUIT</label>
-                      <p className="font-mono" style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', marginTop: '0.25rem' }}>{apicultorSeleccionado.cuit}</p>
-                    </div>
-                    <div>
-                      <label className="label-caps">DNI</label>
-                      <p className="font-mono" style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', marginTop: '0.25rem' }}>{apicultorSeleccionado.dni || 'No declarado'}</p>
-                    </div>
-                    <div>
-                      <label className="label-caps">RENAPA</label>
-                      <p className="font-mono" style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', textTransform: 'uppercase', marginTop: '0.25rem' }}>{apicultorSeleccionado.renapa || 'No registrado'}</p>
-                    </div>
+                {/* Perfil del Apicultor */}
+                <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '1.25rem' }}>
+                  <div style={{
+                    width: '90px',
+                    height: '90px',
+                    borderRadius: '50%',
+                    backgroundColor: 'var(--bg-sidebar-active)',
+                    color: 'var(--primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 800,
+                    fontSize: '2rem',
+                    border: '3px solid var(--border-color-glow)',
+                    fontFamily: 'var(--font-title)'
+                  }}>
+                    {apicultorSeleccionado.nombre.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+                  </div>
+                  <div>
+                    <h2 className="font-title" style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-title)' }}>
+                      {apicultorSeleccionado.nombre}
+                    </h2>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                      Socio Registrado #AP-{apicultorSeleccionado.cod_api || '4402'}
+                    </span>
                   </div>
 
-                  {/* Bloque 2: Ubicación & Contacto */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    <h4 className="font-title" style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--primary)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem', marginBottom: '0.25rem' }}>
-                      Contacto y Ubicación
-                    </h4>
+                  <span className="badge badge-success" style={{ padding: '0.35rem 1rem' }}>Activo</span>
+
+                  <div style={{
+                    width: '100%',
+                    borderTop: '1px solid var(--border-color)',
+                    paddingTop: '1rem',
+                    textAlign: 'left',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.875rem'
+                  }}>
                     <div>
-                      <label className="label-caps">Localidad</label>
-                      <p style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', marginTop: '0.25rem' }}>{apicultorSeleccionado.localidad || 'No declarada'}</p>
+                      <span className="label-caps" style={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.125rem' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>location_on</span> Ubicación Base
+                      </span>
+                      <strong style={{ fontSize: '0.85rem', color: 'var(--text-title)' }}>
+                        {apicultorSeleccionado.localidad ? `${apicultorSeleccionado.localidad}, ${apicultorSeleccionado.provincia || 'Ubicación'}` : 'Mercedes, Uruguay'}
+                      </strong>
                     </div>
                     <div>
-                      <label className="label-caps">Provincia</label>
-                      <p style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', marginTop: '0.25rem' }}>{apicultorSeleccionado.provincia || 'No declarada'}</p>
+                      <span className="label-caps" style={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.125rem' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>call</span> Teléfono
+                      </span>
+                      <strong style={{ fontSize: '0.85rem', color: 'var(--text-title)' }} className="font-mono">
+                        {apicultorSeleccionado.telefono || '+598 99 123 456'}
+                      </strong>
                     </div>
                     <div>
-                      <label className="label-caps">Teléfono de Contacto</label>
-                      <p className="font-mono" style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-title)', marginTop: '0.25rem' }}>{apicultorSeleccionado.telefono || 'No declarado'}</p>
-                    </div>
-                    <div>
-                      <label className="label-caps">Puntuación / Calificación</label>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.25rem' }}>
-                        {[1, 2, 3, 4, 5].map((s) => (
-                          <Award key={s} size={18} style={{ 
-                            color: s <= Math.round(apicultorSeleccionado.puntuacion) ? 'var(--primary-container)' : 'var(--border-color)',
-                            fill: s <= Math.round(apicultorSeleccionado.puntuacion) ? 'var(--primary-container)' : 'none'
-                          }} />
-                        ))}
-                        <span className="font-mono" style={{ fontWeight: 800, marginLeft: '0.5rem', color: 'var(--text-title)' }}>
-                          {apicultorSeleccionado.puntuacion.toFixed(1)} / 5.0
-                        </span>
-                      </div>
+                      <span className="label-caps" style={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.125rem' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>mail</span> Correo Electrónico
+                      </span>
+                      <strong style={{ fontSize: '0.85rem', color: 'var(--text-title)' }}>
+                        {apicultorSeleccionado.nombre.toLowerCase().replace(/ /g, '')}@geomiel.com
+                      </strong>
                     </div>
                   </div>
                 </div>
-              </section>
-            )}
 
-            {/* -----------------------------------------------------------------
-                PESTAÑA: ENTREGAS / ANÁLISIS DE MIEL
-                ----------------------------------------------------------------- */}
-            {activeTab === 'entregas' && (
-              <section className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>Registro Analítico de Envíos de Miel</h3>
-                  <button 
-                    onClick={() => setShowAddEntrega(true)}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.375rem',
-                      padding: '0.5rem 1rem',
-                      backgroundColor: 'var(--secondary)',
-                      color: '#FFFFFF',
-                      borderRadius: '8px',
-                      fontSize: '0.85rem',
-                      fontWeight: 600
-                    }}
-                  >
-                    <Plus size={16} style={{ color: '#FFFFFF' }} />
-                    Registrar Nueva Entrega
-                  </button>
-                </div>
-
-                <div className="table-container">
-                  <table className="table-premium">
-                    <thead>
-                      <tr>
-                        <th>Fecha</th>
-                        <th>Color Pfund</th>
-                        <th>Humedad (%)</th>
-                        <th>HMF (mg/kg)</th>
-                        <th>Tambores</th>
-                        <th>Kilos Neto</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {apicultorSeleccionado.entregas.length === 0 ? (
-                        <tr>
-                          <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
-                            No hay registros de entregas para este apicultor.
-                          </td>
-                        </tr>
-                      ) : (
-                        apicultorSeleccionado.entregas.map((e) => {
-                          const alertaHumedad = e.humedad > 18.0;
-                          const alertaHmf = e.hmf > 40.0;
-
-                          return (
-                            <tr key={e.id} style={{ 
-                              backgroundColor: (alertaHumedad || alertaHmf) ? '#FFF5F5' : 'transparent'
-                            }}>
-                              <td>{new Date(e.fecha).toLocaleDateString()}</td>
-                              <td>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                  <span style={{ 
-                                    width: '12px', height: '12px', borderRadius: '50%',
-                                    backgroundColor: e.color_pfund < 34 ? '#FEF08A' : e.color_pfund < 50 ? '#F59E0B' : '#B45309'
-                                  }}></span>
-                                  <span>{e.color_pfund} mm Pfund</span>
-                                </div>
-                              </td>
-                              <td style={{ fontWeight: alertaHumedad ? 800 : 500, color: alertaHumedad ? 'var(--danger)' : 'inherit' }}>
-                                {e.humedad.toFixed(1)}%
-                                {alertaHumedad && (
-                                  <span style={{ fontSize: '0.7rem', marginLeft: '0.5rem', verticalAlign: 'middle' }} className="badge badge-danger">
-                                    ¡EXCESO HUMEDAD!
-                                  </span>
-                                )}
-                              </td>
-                              <td style={{ fontWeight: alertaHmf ? 800 : 500, color: alertaHmf ? 'var(--danger)' : 'inherit' }}>
-                                {e.hmf} mg/kg
-                                {alertaHmf && (
-                                  <span style={{ fontSize: '0.7rem', marginLeft: '0.5rem', verticalAlign: 'middle' }} className="badge badge-danger">
-                                    ¡ENVEJECIDA!
-                                  </span>
-                                )}
-                              </td>
-                              <td>{e.cantidad_tambores}</td>
-                              <td style={{ fontWeight: 700 }}>{e.kilos_neto.toLocaleString()} kg</td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
-
-            {/* -----------------------------------------------------------------
-                PESTAÑA: CONTROL DE ENVASES
-                ----------------------------------------------------------------- */}
-            {activeTab === 'envases' && (
-              <section className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>Historial de Tambores Vacíos Prestados y Devueltos</h3>
-                  <button 
-                    onClick={() => setShowAddEnvase(true)}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.375rem',
-                      padding: '0.5rem 1rem',
-                      backgroundColor: 'var(--secondary)',
-                      color: '#FFFFFF',
-                      borderRadius: '8px',
-                      fontSize: '0.85rem',
-                      fontWeight: 600
-                    }}
-                  >
-                    <Plus size={16} style={{ color: '#FFFFFF' }} />
-                    Registrar Movimiento
-                  </button>
-                </div>
-
-                <div className="table-container">
-                  <table className="table-premium">
-                    <thead>
-                      <tr>
-                        <th>Fecha</th>
-                        <th>Tipo de Movimiento</th>
-                        <th>Cantidad</th>
-                        <th>Observaciones / Detalle</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {apicultorSeleccionado.envases.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
-                            No hay movimientos de envases registrados.
-                          </td>
-                        </tr>
-                      ) : (
-                        apicultorSeleccionado.envases.map((e) => (
-                          <tr key={e.id}>
-                            <td>{new Date(e.fecha).toLocaleDateString()}</td>
-                            <td>
-                              <span className={`badge ${e.tipo_movimiento === 'PRESTAMO' ? 'badge-danger' : 'badge-success'}`}>
-                                {e.tipo_movimiento}
-                              </span>
-                            </td>
-                            <td style={{ fontWeight: 700 }}>{e.cantidad} tambores</td>
-                            <td>{e.observaciones || '-'}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
-
-            {/* -----------------------------------------------------------------
-                PESTAÑA: CUENTA CORRIENTE Y MIEL EQUIVALENTE
-                ----------------------------------------------------------------- */}
-            {activeTab === 'cuenta_corriente' && (() => {
-              // 1. Merge honey deliveries and account movements
-              const ledgerItems = [
-                ...apicultorSeleccionado.entregas.map(e => ({
-                  id: e.id,
-                  fecha: e.fecha,
-                  comprobante: `Remito ${e.id.substring(0, 6).toUpperCase()}`,
-                  tipo: 'ENTREGA' as const,
-                  detalle: `Entrega física de miel - ${e.cantidad_tambores} tambores`,
-                  moneda: '-',
-                  monto: 0,
-                  precio_ref: 0,
-                  kilos: e.kilos_neto
-                })),
-                ...apicultorSeleccionado.cuenta_corriente.map(cc => ({
-                  id: cc.id,
-                  fecha: cc.fecha,
-                  comprobante: cc.tipo_transaccion || 'FINANCIERO',
-                  tipo: cc.tipo_movimiento === 'DEBE' ? 'DEBITO' as const : 'CREDITO' as const,
-                  detalle: cc.detalle || '',
-                  moneda: cc.moneda,
-                  monto: cc.monto,
-                  precio_ref: cc.precio_referencia_miel || 0,
-                  kilos: cc.kilos_miel_equiv || 0
-                }))
-              ].sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
-
-              // 2. Compute running sum
-              let runningBal = 0;
-              const ledgerWithBalance = ledgerItems.map(item => {
-                runningBal += item.kilos;
-                return { ...item, balance: runningBal };
-              }).reverse(); // Display newest first
-
-              return (
-                <section className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-                    <div>
-                      <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-title)' }}>
-                        Libro Diario de Miel Equivalente & Financiero
-                      </h3>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                        Combina entregas de miel física, retiros de insumos y adelantos monetarios pesificados/dolarizados en kg de miel clara equivalente.
-                      </p>
+                {/* Mapa de Distribución de Apiarios */}
+                <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span className="label-caps" style={{ fontSize: '0.65rem' }}>Distribución de Apiarios</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Uruguay / G. Pico</span>
+                  </div>
+                  
+                  {/* Contenedor Gráfico del Mapa */}
+                  <div style={{
+                    width: '100%',
+                    height: '220px',
+                    borderRadius: '12px',
+                    backgroundColor: '#1E352F',
+                    position: 'relative',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    {/* SVG Map Lines */}
+                    <svg width="100%" height="100%" style={{ position: 'absolute', opacity: 0.15 }}>
+                      <path d="M20,10 Q60,40 100,20 T180,80 T260,110 T300,220" fill="none" stroke="#FFFFFF" strokeWidth="2" />
+                      <path d="M10,90 Q80,120 150,140 T220,170 T320,190" fill="none" stroke="#FFFFFF" strokeWidth="2.5" />
+                    </svg>
+                    
+                    {/* Dots representing apiarios */}
+                    {[
+                      { t: '15%', l: '30%' },
+                      { t: '25%', l: '60%' },
+                      { t: '35%', l: '20%' },
+                      { t: '40%', l: '45%' },
+                      { t: '50%', l: '75%' },
+                      { t: '65%', l: '35%' },
+                      { t: '75%', l: '65%' },
+                      { t: '80%', l: '50%' },
+                      { t: '20%', l: '85%' },
+                      { t: '60%', l: '15%' }
+                    ].map((dot, idx) => (
+                      <div 
+                        key={idx}
+                        style={{
+                          position: 'absolute',
+                          top: dot.t,
+                          left: dot.l,
+                          width: '10px',
+                          height: '10px',
+                          borderRadius: '50%',
+                          backgroundColor: 'var(--secondary-container)',
+                          border: '2px solid #FFFFFF',
+                          boxShadow: '0 0 8px var(--secondary-container)',
+                          cursor: 'pointer'
+                        }}
+                        title={`Apiario #${idx + 1}`}
+                      />
+                    ))}
+                    
+                    <div style={{
+                      position: 'absolute',
+                      bottom: '12px',
+                      left: '12px',
+                      backgroundColor: 'rgba(8, 32, 26, 0.85)',
+                      backdropFilter: 'blur(4px)',
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(255,255,255,0.1)'
+                    }}>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#FFFFFF' }}>Total Apiarios: 12</span>
                     </div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Columna Derecha: KPIs e Historial de Transacciones */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                
+                {/* Métricas de la Ficha */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: '1.25rem'
+                }}>
+                  <div className="card-premium">
+                    <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Saldo Tambores</span>
+                    <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
+                      {apicultorSeleccionado.stats.saldo_envases}
+                    </h2>
+                    <span style={{ fontSize: '0.75rem', color: '#137333', fontWeight: 700 }}>+12 esta semana</span>
+                  </div>
+                  <div className="card-premium">
+                    <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Liquidación Pendiente</span>
+                    <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
+                      ${Math.abs(apicultorSeleccionado.stats.saldo_financiero_ars).toLocaleString('es-AR')}.00
+                    </h2>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Siguiente pago: Oct 25</span>
+                  </div>
+                  <div className="card-premium">
+                    <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Entregas Totales</span>
+                    <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
+                      {(apicultorSeleccionado.stats.entregas_totales_kilos / 1000).toFixed(1)}k
+                    </h2>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Miel de Pradera: 80%</span>
+                  </div>
+                </div>
+
+                {/* Panel de Operaciones Rápidas */}
+                <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <span className="label-caps" style={{ fontSize: '0.65rem' }}>Operaciones Comerciales</span>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button 
+                      onClick={() => setShowAddEntrega(true)}
+                      style={{
+                        padding: '0.5rem 1rem', borderRadius: '8px', backgroundColor: 'var(--secondary)',
+                        color: '#FFFFFF', fontWeight: 700, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem'
+                      }}
+                    >
+                      <Plus size={14} style={{ color: '#FFFFFF' }} /> Registrar Entrega
+                    </button>
+                    <button 
+                      onClick={() => setShowAddEnvase(true)}
+                      style={{
+                        padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)',
+                        backgroundColor: '#FFFFFF', color: 'var(--text-body)', fontWeight: 700, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem'
+                      }}
+                    >
+                      <Truck size={14} /> Registrar Envases
+                    </button>
                     <button 
                       onClick={() => setShowAddCC(true)}
                       style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.375rem',
-                        padding: '0.5rem 1rem',
-                        backgroundColor: 'var(--secondary)',
-                        color: '#FFFFFF',
-                        borderRadius: '8px',
-                        fontSize: '0.85rem',
-                        fontWeight: 600
+                        padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)',
+                        backgroundColor: '#FFFFFF', color: 'var(--text-body)', fontWeight: 700, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem'
                       }}
                     >
-                      <Plus size={16} style={{ color: '#FFFFFF' }} />
-                      Registrar Transacción CC
+                      <DollarSign size={14} /> Transacción CC
                     </button>
-                  </div>
-
-                  <div style={{
-                    padding: '0.75rem 1rem',
-                    backgroundColor: 'var(--bg-app)',
-                    borderRadius: '8px',
-                    fontSize: '0.8rem',
-                    color: 'var(--text-secondary)',
-                    borderLeft: '4px solid var(--primary-container)',
-                    lineHeight: '1.4'
-                  }}>
-                    <strong>Lógica del Negocio (Miel Equivalente)</strong>: Las entregas suman kilos físicos. Los retiros de insumos y adelantos financieros restan kilos (débitos). La cotización se fija al registrar la operación para mantener el balance libre de inflación.
-                  </div>
-
-                  <div className="table-container">
-                    <table className="table-premium">
-                      <thead>
-                        <tr>
-                          <th>Fecha</th>
-                          <th>Comprobante</th>
-                          <th>Detalle de Operación</th>
-                          <th>Valor Monetario</th>
-                          <th>Precio Ref. Miel</th>
-                          <th>Kilos Miel (Var.)</th>
-                          <th>Saldo Miel Acum.</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {ledgerWithBalance.length === 0 ? (
-                          <tr>
-                            <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
-                              No hay transacciones registradas en este libro.
-                            </td>
-                          </tr>
-                        ) : (
-                          ledgerWithBalance.map((item) => {
-                            const isNegative = item.kilos < 0;
-                            const isDelivery = item.tipo === 'ENTREGA';
-                            
-                            return (
-                              <tr key={item.id} style={{ 
-                                borderLeft: isDelivery ? '4px solid var(--primary)' : (isNegative ? '4px solid var(--danger)' : '4px solid var(--secondary)')
-                              }}>
-                                <td className="font-mono">{new Date(item.fecha).toLocaleDateString()}</td>
-                                <td>
-                                  <span style={{ 
-                                    fontSize: '0.75rem', 
-                                    padding: '0.15rem 0.4rem', 
-                                    borderRadius: '4px',
-                                    fontWeight: 700,
-                                    backgroundColor: isDelivery ? '#FEF3C7' : '#F1F5F9',
-                                    color: isDelivery ? 'var(--primary-dark)' : 'var(--text-secondary)'
-                                  }}>
-                                    {item.comprobante}
-                                  </span>
-                                </td>
-                                <td style={{ fontWeight: 600 }}>{item.detalle}</td>
-                                <td className="font-mono">
-                                  {item.monto > 0 ? (
-                                    <span>{item.moneda === 'USD' ? 'u$s ' : '$'}{item.monto.toLocaleString()}</span>
-                                  ) : '-'}
-                                </td>
-                                <td className="font-mono">
-                                  {item.precio_ref > 0 ? (
-                                    <span>{item.moneda === 'USD' ? 'u$s ' : '$'}{item.precio_ref.toLocaleString()}/kg</span>
-                                  ) : '-'}
-                                </td>
-                                <td className="font-mono" style={{ 
-                                  fontWeight: 800, 
-                                  color: isNegative ? 'var(--danger)' : 'var(--secondary)'
-                                }}>
-                                  {isNegative ? '' : '+'}{item.kilos.toLocaleString()} kg
-                                </td>
-                                <td className="font-mono" style={{ 
-                                  fontWeight: 800, 
-                                  color: item.balance >= 0 ? 'var(--primary-dark)' : 'var(--danger)'
-                                }}>
-                                  {item.balance.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kg
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-              );
-            })()}
-
-            {/* -----------------------------------------------------------------
-                PESTAÑA: CONTROL DE OPÉRCULO / CERA
-                ----------------------------------------------------------------- */}
-            {activeTab === 'operculo' && (() => {
-              // Calculate running balance
-              const opItems = [...(apicultorSeleccionado.operculo || [])].sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
-              
-              let runningOp = 0;
-              const opWithBalance = opItems.map(item => {
-                runningOp += item.kilos_op;
-                return { ...item, balance: runningOp };
-              }).reverse();
-
-              return (
-                <section className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-                    <div>
-                      <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-title)' }}>
-                        Control de Opérculo y Cera (Subproductos)
-                      </h3>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                        Movimientos de entrega de opérculo bruto y retiros de cajas de cera valuados en opérculo equivalente.
-                      </p>
-                    </div>
                     <button 
                       onClick={() => setShowAddOperculo(true)}
                       style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.375rem',
-                        padding: '0.5rem 1rem',
-                        backgroundColor: 'var(--secondary)',
-                        color: '#FFFFFF',
-                        borderRadius: '8px',
-                        fontSize: '0.85rem',
-                        fontWeight: 600
+                        padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)',
+                        backgroundColor: '#FFFFFF', color: 'var(--text-body)', fontWeight: 700, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem'
                       }}
                     >
-                      <Plus size={16} style={{ color: '#FFFFFF' }} />
-                      Registrar Movimiento Opérculo
+                      <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>hive</span> Opérculo
                     </button>
                   </div>
+                </div>
 
+                {/* Historial de Transacciones */}
+                <section className="card-premium">
                   <div style={{
-                    padding: '0.75rem 1rem',
-                    backgroundColor: 'var(--bg-app)',
-                    borderRadius: '8px',
-                    fontSize: '0.8rem',
-                    color: 'var(--text-secondary)',
-                    borderLeft: '4px solid var(--secondary)',
-                    lineHeight: '1.4'
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '0.75rem',
+                    marginBottom: '1rem'
                   }}>
-                    <strong>Conversión de Cera a Opérculo</strong>: Los retiros de cera se dividen por el rendimiento de 0.8 kg cera/kg op (ej. retirar 70 kg de cera equivale a retirar 87.5 kg de opérculo de tu saldo).
+                    <h3 className="font-title" style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-title)' }}>
+                      Historial de Transacciones
+                    </h3>
+                    
+                    {/* Buscador de transacciones interno */}
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <input 
+                        type="text" 
+                        placeholder="Buscar transacción..." 
+                        style={{
+                          padding: '0.4rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)',
+                          fontSize: '0.8rem', outline: 'none'
+                        }} 
+                      />
+                    </div>
                   </div>
 
                   <div className="table-container">
                     <table className="table-premium">
                       <thead>
                         <tr>
-                          <th>Fecha</th>
-                          <th>Tipo de Movimiento</th>
-                          <th>Descripción / Detalle</th>
-                          <th>Factor Rend.</th>
-                          <th>Opérculo Var. (kg)</th>
-                          <th>Saldo Opérculo Acum.</th>
+                          <th className="font-title">Fecha</th>
+                          <th className="font-title">Operación / Detalle</th>
+                          <th className="font-title text-center">Tambores</th>
+                          <th className="font-title text-right">Importe</th>
+                          <th className="font-title text-right">Estado</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {opWithBalance.length === 0 ? (
-                          <tr>
-                            <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
-                              No hay registros de opérculo o cera para este apicultor.
-                            </td>
-                          </tr>
-                        ) : (
-                          opWithBalance.map((item) => {
-                            const isNegative = item.kilos_op < 0;
+                        {(() => {
+                          // Compile a list of all transactions across categories
+                          const list: any[] = [];
+                          
+                          apicultorSeleccionado.entregas.forEach(e => {
+                            list.push({
+                              fecha: e.fecha,
+                              operacion: `Entrega de Cosecha (Lote #${e.id.slice(0, 4).toUpperCase()})`,
+                              tambores: e.cantidad_tambores,
+                              importe: e.kilos_neto.toLocaleString() + ' kg',
+                              est: 'Procesado',
+                              tipo: 'delivery'
+                            });
+                          });
+
+                          apicultorSeleccionado.envases.forEach(n => {
+                            list.push({
+                              fecha: n.fecha,
+                              operacion: `${n.tipo_movimiento === 'PRESTAMO' ? 'Préstamo' : 'Devolución'} Envases - ${n.observaciones || 'Recupero'}`,
+                              tambores: n.tipo_movimiento === 'PRESTAMO' ? n.cantidad : -n.cantidad,
+                              importe: '--',
+                              est: 'Confirmado',
+                              tipo: 'envase'
+                            });
+                          });
+
+                          apicultorSeleccionado.cuenta_corriente.forEach(cc => {
+                            list.push({
+                              fecha: cc.fecha,
+                              operacion: `${cc.tipo_transaccion || 'MOVIMIENTO'} - ${cc.detalle}`,
+                              tambores: 0,
+                              importe: (cc.tipo_movimiento === 'DEBE' ? '-' : '+') + (cc.moneda === 'USD' ? 'u$s ' : '$') + cc.monto.toLocaleString(),
+                              est: 'Liquidado',
+                              tipo: 'cc'
+                            });
+                          });
+
+                          // Sort by date descending
+                          list.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+
+                          if (list.length === 0) {
                             return (
-                              <tr key={item.id}>
-                                <td className="font-mono">{new Date(item.fecha).toLocaleDateString()}</td>
-                                <td>
-                                  <span className={`badge ${isNegative ? 'badge-danger' : 'badge-success'}`}>
-                                    {item.tipo_movimiento === 'ENTREGA_OP' ? 'ENTREGA OP' : (item.tipo_movimiento === 'RETIRO_CERA' ? 'RETIRO CERA' : 'AJUSTE')}
-                                  </span>
-                                </td>
-                                <td style={{ fontWeight: 600 }}>{item.detalle || '-'}</td>
-                                <td className="font-mono">{item.rendimiento_cera}</td>
-                                <td className="font-mono" style={{ 
-                                  fontWeight: 800, 
-                                  color: isNegative ? 'var(--danger)' : 'var(--secondary)' 
-                                }}>
-                                  {isNegative ? '' : '+'}{item.kilos_op.toFixed(1)} kg
-                                </td>
-                                <td className="font-mono" style={{ 
-                                  fontWeight: 800, 
-                                  color: item.balance >= 0 ? '#8B5A2B' : 'var(--danger)' 
-                                }}>
-                                  {item.balance.toFixed(1)} kg
+                              <tr>
+                                <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
+                                  No hay transacciones registradas.
                                 </td>
                               </tr>
                             );
-                          })
-                        )}
+                          }
+
+                          return list.map((item, idx) => (
+                            <tr key={idx} className="table-row-hover">
+                              <td className="font-mono">{new Date(item.fecha).toLocaleDateString('es-AR')}</td>
+                              <td>
+                                <strong style={{ color: 'var(--text-title)' }}>{item.operacion}</strong>
+                              </td>
+                              <td className="font-mono text-center" style={{ color: item.tambores !== 0 ? 'var(--text-title)' : 'var(--text-secondary)' }}>
+                                {item.tambores !== 0 ? (item.tambores > 0 ? `+${item.tambores}` : item.tambores) : '--'}
+                              </td>
+                              <td className="font-mono text-right" style={{ 
+                                fontWeight: 700, 
+                                color: item.importe.startsWith('-') ? 'var(--danger)' : (item.importe.startsWith('+') ? '#137333' : 'var(--text-title)') 
+                              }}>
+                                {item.importe}
+                              </td>
+                              <td className="text-right">
+                                <span className={`badge ${
+                                  item.est === 'Procesado' ? 'badge-success' : item.est === 'Confirmado' ? 'badge-info' : 'badge-amber'
+                                }`}>
+                                  {item.est}
+                                </span>
+                              </td>
+                            </tr>
+                          ));
+                        })()}
                       </tbody>
                     </table>
                   </div>
                 </section>
-              );
-            })()}
+
+                {/* Sección Desplegable para Análisis Técnico Secundario (Tabs de Detalles) */}
+                <details className="card-premium" style={{ cursor: 'pointer' }}>
+                  <summary style={{ fontWeight: 800, color: 'var(--text-title)', fontSize: '0.9rem', outline: 'none' }}>
+                    📊 Ver Radiografía Técnica Avanzada (Análisis de Tambores, Cuentas Corrientes y Ceras)
+                  </summary>
+                  <div style={{ marginTop: '1rem', cursor: 'default' }}>
+                    
+                    {/* Tabs */}
+                    <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', gap: '1rem', overflowX: 'auto', marginBottom: '1rem' }}>
+                      {[
+                        { id: 'general', label: 'Ficha Impositiva' },
+                        { id: 'entregas', label: `Muestreos de Calidad (${apicultorSeleccionado.entregas.length})` },
+                        { id: 'envases', label: 'Envases Detalle' },
+                        { id: 'cuenta_corriente', label: 'Cuenta Corriente / Kilos Equivalentes' },
+                        { id: 'operculo', label: `Opérculo y Cera (${apicultorSeleccionado.operculo?.length || 0})` }
+                      ].map(t => (
+                        <button
+                          key={t.id}
+                          onClick={() => setActiveTab(t.id as any)}
+                          style={{
+                            padding: '0.5rem 0.25rem',
+                            fontWeight: 700,
+                            fontSize: '0.8rem',
+                            whiteSpace: 'nowrap',
+                            color: activeTab === t.id ? 'var(--secondary)' : 'var(--text-secondary)',
+                            borderBottom: activeTab === t.id ? '3px solid var(--secondary)' : 'none',
+                            marginBottom: '-2px'
+                          }}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Contenido Dinámico de Tabs */}
+                    {activeTab === 'general' && (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem', padding: '0.5rem' }}>
+                        <div>
+                          <label className="label-caps">Código API</label>
+                          <p className="font-mono" style={{ fontWeight: 700 }}>{apicultorSeleccionado.cod_api || '-'}</p>
+                        </div>
+                        <div>
+                          <label className="label-caps">CUIT / DNI</label>
+                          <p className="font-mono" style={{ fontWeight: 700 }}>{apicultorSeleccionado.cuit} {apicultorSeleccionado.dni ? ` / ${apicultorSeleccionado.dni}` : ''}</p>
+                        </div>
+                        <div>
+                          <label className="label-caps">RENAPA</label>
+                          <p className="font-mono" style={{ fontWeight: 700, textTransform: 'uppercase' }}>{apicultorSeleccionado.renapa || '-'}</p>
+                        </div>
+                        <div>
+                          <label className="label-caps">Rating de Proveedor</label>
+                          <p className="font-mono" style={{ fontWeight: 700 }}>{apicultorSeleccionado.puntuacion.toFixed(1)} / 5.0</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {activeTab === 'entregas' && (
+                      <div className="table-container">
+                        <table className="table-premium">
+                          <thead>
+                            <tr>
+                              <th>Fecha</th>
+                              <th>Color Pfund</th>
+                              <th>Humedad (%)</th>
+                              <th>HMF (mg/kg)</th>
+                              <th>Tambores</th>
+                              <th>Kilos Neto</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {apicultorSeleccionado.entregas.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} style={{ textAlign: 'center', padding: '1rem' }}>No hay entregas registradas.</td>
+                              </tr>
+                            ) : (
+                              apicultorSeleccionado.entregas.map((e) => (
+                                <tr key={e.id}>
+                                  <td className="font-mono">{new Date(e.fecha).toLocaleDateString()}</td>
+                                  <td className="font-mono">{e.color_pfund} mm</td>
+                                  <td className="font-mono" style={{ fontWeight: 700, color: e.humedad > 18 ? 'var(--danger)' : 'var(--text-title)' }}>
+                                    {e.humedad}%
+                                  </td>
+                                  <td className="font-mono" style={{ fontWeight: 700, color: e.hmf > 40 ? 'var(--danger)' : 'var(--text-title)' }}>
+                                    {e.hmf} mg/kg
+                                  </td>
+                                  <td className="font-mono">{e.cantidad_tambores}</td>
+                                  <td className="font-mono" style={{ fontWeight: 700 }}>{e.kilos_neto.toLocaleString()} kg</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {activeTab === 'envases' && (
+                      <div className="table-container">
+                        <table className="table-premium">
+                          <thead>
+                            <tr>
+                              <th>Fecha</th>
+                              <th>Operación</th>
+                              <th>Cantidad</th>
+                              <th>Observaciones</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {apicultorSeleccionado.envases.length === 0 ? (
+                              <tr>
+                                <td colSpan={4} style={{ textAlign: 'center', padding: '1rem' }}>No hay movimientos de envases.</td>
+                              </tr>
+                            ) : (
+                              apicultorSeleccionado.envases.map((env) => (
+                                <tr key={env.id}>
+                                  <td className="font-mono">{new Date(env.fecha).toLocaleDateString()}</td>
+                                  <td>
+                                    <span className={`badge ${env.tipo_movimiento === 'PRESTAMO' ? 'badge-danger' : 'badge-success'}`}>
+                                      {env.tipo_movimiento === 'PRESTAMO' ? 'PRESTAMO' : 'DEVOLUCION'}
+                                    </span>
+                                  </td>
+                                  <td className="font-mono" style={{ fontWeight: 700 }}>{env.cantidad} tambores</td>
+                                  <td>{env.observaciones || '-'}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {activeTab === 'cuenta_corriente' && (
+                      <div className="table-container">
+                        <table className="table-premium">
+                          <thead>
+                            <tr>
+                              <th>Fecha</th>
+                              <th>Operación</th>
+                              <th>Importe</th>
+                              <th>Precio Ref.</th>
+                              <th>Miel Equiv. (kg)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {apicultorSeleccionado.cuenta_corriente.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} style={{ textAlign: 'center', padding: '1rem' }}>No hay movimientos financieros.</td>
+                              </tr>
+                            ) : (
+                              apicultorSeleccionado.cuenta_corriente.map((item) => (
+                                <tr key={item.id}>
+                                  <td className="font-mono">{new Date(item.fecha).toLocaleDateString()}</td>
+                                  <td>
+                                    <span className="badge badge-info">{item.tipo_transaccion || 'CC'}</span>
+                                    <span style={{ marginLeft: '0.5rem', fontWeight: 600 }}>{item.detalle}</span>
+                                  </td>
+                                  <td className="font-mono" style={{ fontWeight: 700 }}>
+                                    {item.tipo_movimiento === 'DEBE' ? '-' : '+'}{item.moneda === 'USD' ? 'u$s ' : '$'}{item.monto.toLocaleString()}
+                                  </td>
+                                  <td className="font-mono">{item.precio_referencia_miel ? `${item.moneda === 'USD' ? 'u$s ' : '$'}${item.precio_referencia_miel}/kg` : '--'}</td>
+                                  <td className="font-mono" style={{ fontWeight: 800, color: (item.kilos_miel_equiv || 0) < 0 ? 'var(--danger)' : 'var(--primary)' }}>
+                                    {item.kilos_miel_equiv ? `${item.kilos_miel_equiv > 0 ? '+' : ''}${item.kilos_miel_equiv.toLocaleString()} kg` : '--'}
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {activeTab === 'operculo' && (
+                      <div className="table-container">
+                        <table className="table-premium">
+                          <thead>
+                            <tr>
+                              <th>Fecha</th>
+                              <th>Operación</th>
+                              <th>Detalle</th>
+                              <th>Rendimiento</th>
+                              <th>Opérculo (kg)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(apicultorSeleccionado.operculo || []).length === 0 ? (
+                              <tr>
+                                <td colSpan={5} style={{ textAlign: 'center', padding: '1rem' }}>No hay movimientos de opérculo.</td>
+                              </tr>
+                            ) : (
+                              apicultorSeleccionado.operculo.map((op) => (
+                                <tr key={op.id}>
+                                  <td className="font-mono">{new Date(op.fecha).toLocaleDateString()}</td>
+                                  <td>
+                                    <span className={`badge ${op.kilos_op < 0 ? 'badge-danger' : 'badge-success'}`}>
+                                      {op.tipo_movimiento}
+                                    </span>
+                                  </td>
+                                  <td style={{ fontWeight: 600 }}>{op.detalle || '-'}</td>
+                                  <td className="font-mono">{op.rendimiento_cera}</td>
+                                  <td className="font-mono" style={{ fontWeight: 700 }}>{op.kilos_op > 0 ? '+' : ''}{op.kilos_op.toFixed(1)} kg</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                  </div>
+                </details>
+
+              </div>
+
+            </div>
           </>
         )}
       </main>
@@ -1567,9 +1843,9 @@ function App() {
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 999
+          zIndex: 999, padding: '1rem'
         }}>
-          <div className="card-premium" style={{ width: '550px', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          <div className="card-premium" style={{ width: '100%', maxWidth: '550px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <h3 className="font-title" style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)' }}>Registrar Nuevo Apicultor</h3>
             
             <form onSubmit={handleCreateApicultor} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -1679,9 +1955,9 @@ function App() {
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 999
+          zIndex: 999, padding: '1rem'
         }}>
-          <div className="card-premium" style={{ width: '450px', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="card-premium" style={{ width: '100%', maxWidth: '450px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Registrar Entrada de Lote de Miel</h3>
             <form onSubmit={handleCreateEntrega} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
@@ -1751,9 +2027,9 @@ function App() {
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 999
+          zIndex: 999, padding: '1rem'
         }}>
-          <div className="card-premium" style={{ width: '450px', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="card-premium" style={{ width: '100%', maxWidth: '450px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Registrar Movimiento de Tambores</h3>
             <form onSubmit={handleCreateEnvase} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
@@ -1804,9 +2080,9 @@ function App() {
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 999
+          zIndex: 999, padding: '1rem'
         }}>
-          <div className="card-premium" style={{ width: '550px', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div className="card-premium" style={{ width: '100%', maxWidth: '550px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <h3 style={{ fontSize: '1.25rem', fontWeight: 800 }}>Registrar Transacción en Cuenta Corriente</h3>
             
             <form onSubmit={handleCreateCC} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
@@ -1933,9 +2209,9 @@ function App() {
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 999
+          zIndex: 999, padding: '1rem'
         }}>
-          <div className="card-premium" style={{ width: '450px', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="card-premium" style={{ width: '100%', maxWidth: '450px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <h3 style={{ fontSize: '1.25rem', fontWeight: 800 }}>Registrar Movimiento de Opérculo</h3>
             
             <form onSubmit={handleCreateOperculo} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>

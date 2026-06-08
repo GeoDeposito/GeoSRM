@@ -230,3 +230,275 @@ a {
   background-color: var(--danger);
 }
 
+/* =========================================================================
+   ESTILOS RESPONSIVOS Y DISEÑOS PREMIUM DE ALTA FIDELIDAD (SRM GEOMIEL)
+   ========================================================================= */
+
+/* Estructura del Layout con Sidebar Adaptativo */
+.sidebar-premium {
+  width: 280px;
+  background-color: var(--bg-sidebar);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 1.5rem 1rem;
+  flex-shrink: 0;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (max-width: 1024px) {
+  .sidebar-premium {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 1000;
+    transform: translateX(-100%);
+    box-shadow: 0 0 24px rgba(8, 32, 26, 0.15);
+  }
+  .sidebar-premium.open {
+    transform: translateX(0);
+  }
+}
+
+/* Overlay para el Sidebar en móviles */
+.sidebar-overlay {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .sidebar-overlay.open {
+    display: block;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: rgba(8, 32, 26, 0.4);
+    backdrop-filter: blur(4px);
+    z-index: 999;
+  }
+}
+
+/* Grillas de Contenido Responsivas */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 2.2fr 1fr;
+  gap: 1.5rem;
+}
+
+.ficha-grid {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-grid, .ficha-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.charts-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    padding: 1rem;
+    gap: 1rem;
+  }
+}
+
+/* Botón Hamburguesa de Menú Móvil */
+.burger-menu-btn {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .burger-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background-color: #FFFFFF;
+    color: var(--primary);
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+  }
+  .burger-menu-btn:hover {
+    background-color: var(--border-color);
+  }
+}
+
+/* Estilos de Gráficos Custom (Ventas vs Gastos) */
+.bar-chart-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.bar-chart-y-axis {
+  display: flex;
+  justify-content: space-between;
+  height: 180px;
+  align-items: flex-end;
+  border-bottom: 2px solid var(--border-color);
+  padding-bottom: 0.25rem;
+  position: relative;
+  width: 100%;
+}
+
+.bar-chart-month-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.bar-chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 100%;
+  width: 100%;
+  justify-content: center;
+  padding: 0 0.25rem;
+}
+
+.bar-chart-bar {
+  width: 16px;
+  border-radius: 4px 4px 0 0;
+  transition: height 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  cursor: pointer;
+}
+
+@media (min-width: 480px) {
+  .bar-chart-bar {
+    width: 22px;
+  }
+}
+
+.bar-chart-bar:hover::after {
+  content: attr(data-val);
+  position: absolute;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: var(--primary);
+  color: #FFFFFF;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  padding: 3px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  box-shadow: var(--shadow-subtle);
+  z-index: 10;
+}
+
+.bar-chart-bar-ingresos {
+  background-color: var(--secondary); /* Honey Gold */
+}
+
+.bar-chart-bar-costos {
+  background-color: #5C6F68; /* Forest Green soft */
+}
+
+.bar-chart-x-axis {
+  display: flex;
+  justify-content: space-around;
+  font-size: 0.75rem;
+  font-family: var(--font-label);
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  width: 100%;
+  padding-top: 0.5rem;
+}
+
+/* Gráfico de Dona Custom */
+.donut-chart-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  padding: 1rem 0;
+}
+
+@media (min-width: 480px) {
+  .donut-chart-wrapper {
+    flex-direction: row;
+    gap: 2rem;
+  }
+}
+
+.donut-chart-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  width: 100%;
+}
+
+.donut-legend-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.donut-legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+  margin-right: 0.5rem;
+}
+
+/* Estilo para los Avatares Circulares */
+.avatar-circle-srm {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--border-color);
+}
+
+.avatar-circle-lg {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid var(--border-color-glow);
+}
+
+/* Alineación de textos en tablas y elementos generales */
+.text-right {
+  text-align: right !important;
+}
+
+.text-center {
+  text-align: center !important;
+}
+
+.text-left {
+  text-align: left !important;
+}
+
+
