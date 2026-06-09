@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { srmService } from './services/srmService';
 import { isMockMode } from './services/supabaseClient';
-import type { Apicultor, ApicultorCompleto } from './types/srm.types';
+import type { Apicultor, ApicultorCompleto, Producto } from './types/srm.types';
 import './App.css';
 
 
@@ -30,6 +30,7 @@ function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [filtroAlerta, setFiltroAlerta] = useState(false);
   const [activeTab, setActiveTab] = useState<'general' | 'entregas' | 'envases' | 'cuenta_corriente' | 'operculo'>('general');
+  const [productos, setProductos] = useState<Producto[]>([]);
   const [globalStats, setGlobalStats] = useState<{
     totalKilosMiel: number;
     totalTamboresCampo: number;
@@ -94,8 +95,10 @@ function App() {
       setApicultores(lista);
       const stats = await srmService.getGlobalStats();
       setGlobalStats(stats);
+      const prods = await srmService.listProductos();
+      setProductos(prods);
     } catch (e) {
-      console.error('Error cargando apicultores:', e);
+      console.error('Error cargando apicultores y productos:', e);
     }
   };
 
@@ -668,111 +671,101 @@ function App() {
             {/* Columna Principal Izquierda */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               
-              {/* Tarjetas KPI de Inteligencia Financiera */}
+              {/* Tarjetas KPI de Operaciones Geomiel */}
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
                 gap: '1rem'
               }}>
                 <div className="card-premium hex-pattern" style={{ padding: '1.25rem' }}>
-                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Ventas Totales</span>
-                  <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>$142,500.00</h2>
-                  <span style={{ fontSize: '0.75rem', color: '#137333', fontWeight: 700 }}>↗ +12.5% vs mes anterior</span>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Proveedores Registrados</span>
+                  <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>{apicultores.length}</h2>
+                  <span style={{ fontSize: '0.75rem', color: '#137333', fontWeight: 700 }}>Activos en base de datos</span>
                 </div>
                 <div className="card-premium hex-pattern" style={{ padding: '1.25rem' }}>
-                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Gastos Operativos</span>
-                  <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>$38,200.00</h2>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--danger)', fontWeight: 700 }}>↗ +4.2% vs presupuestado</span>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Miel Total Recibida</span>
+                  <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>{(globalStats.totalKilosMiel / 1000).toFixed(1)} Ton</h2>
+                  <span style={{ fontSize: '0.75rem', color: '#137333', fontWeight: 700 }}>{globalStats.totalKilosMiel.toLocaleString('es-AR')} kg en total</span>
                 </div>
                 <div className="card-premium hex-pattern" style={{ padding: '1.25rem' }}>
-                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Utilidad Neta</span>
-                  <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>$104,300.00</h2>
-                  <span style={{ fontSize: '0.75rem', color: '#137333', fontWeight: 700 }}>↗ +15.1% margen neto</span>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Tambores en el Campo</span>
+                  <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>{globalStats.totalTamboresCampo}</h2>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Saldo neto de envases prestados</span>
                 </div>
                 <div className="card-premium hex-pattern" style={{ padding: '1.25rem' }}>
-                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Precio Promedio/Ton</span>
-                  <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>$4,850.00</h2>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Estable en el mercado global</span>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Saldo CC (Miel Equivalente)</span>
+                  <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>{(globalStats.totalMielEquivSaldo / 1000).toFixed(1)} Ton</h2>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{globalStats.totalMielEquivSaldo.toLocaleString('es-AR')} kg virtuales</span>
                 </div>
               </div>
 
-              {/* Gráficos de Desempeño */}
+              {/* Ficha Destacada Ruiz y Tipo de Miel */}
               <div className="charts-grid">
                 
-                {/* Gráfico Ventas vs Gastos */}
-                <div className="card-premium">
-                  <h3 className="font-title" style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-title)', marginBottom: '0.5rem' }}>Ventas vs. Gastos</h3>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>Comparativa de ingresos y costos operativos mensuales en dólares.</p>
+                {/* Ruiz Rubén Oscar Quick Access */}
+                <div className="card-premium" style={{ borderLeft: '4px solid var(--secondary)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <span className="label-caps" style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontWeight: 700 }}>Productor Destacado</span>
+                        <h3 className="font-title" style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)', marginTop: '0.25rem', marginBottom: '0.5rem' }}>Ruiz Rubén Oscar</h3>
+                      </div>
+                      <div className="badge badge-success">Activo</div>
+                    </div>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.4, marginBottom: '1rem' }}>
+                      Acceso rápido al perfil de Ruiz Rubén Oscar (General Pico). Visualiza sus 8 entregas, control de 147 tambores individuales, control de envases vacíos (saldo de 137 tambores) y cuenta corriente de doble saldo.
+                    </p>
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      gap: '0.75rem',
+                      backgroundColor: 'rgba(8, 32, 26, 0.03)',
+                      padding: '0.75rem',
+                      borderRadius: '8px',
+                      fontSize: '0.8rem',
+                      marginBottom: '1rem'
+                    }}>
+                      <div><strong>CUIT:</strong> 20-08046134-4</div>
+                      <div><strong>Localidad:</strong> G. Pico, La Pampa</div>
+                      <div><strong>Entregas:</strong> 8 registradas</div>
+                      <div><strong>Tambores:</strong> 147 individuales</div>
+                    </div>
+                  </div>
                   
-                  <div className="bar-chart-container">
-                    <div className="bar-chart-y-axis">
-                      {/* Grid Lines */}
-                      <div className="bar-chart-grid-line" style={{ bottom: '75%' }}></div>
-                      <div className="bar-chart-grid-line" style={{ bottom: '50%' }}></div>
-                      <div className="bar-chart-grid-line" style={{ bottom: '25%' }}></div>
-                      
-                      {[
-                        { mes: 'Jun', ing: 110, cos: 35 },
-                        { mes: 'Jul', ing: 135, cos: 45 },
-                        { mes: 'Ago', ing: 160, cos: 50 },
-                        { mes: 'Sep', ing: 185, cos: 55 },
-                        { mes: 'Oct', ing: 155, cos: 40 },
-                      ].map((m, idx) => (
-                        <div key={idx} className="bar-chart-month-group">
-                          <div className="bar-chart-bars">
-                            <div 
-                              className="bar-chart-bar bar-chart-bar-ingresos" 
-                              style={{ height: `${(m.ing / 200) * 100}%` }}
-                              data-val={`$${m.ing}k`}
-                            />
-                            <div 
-                              className="bar-chart-bar bar-chart-bar-costos" 
-                              style={{ height: `${(m.cos / 200) * 100}%` }}
-                              data-val={`$${m.cos}k`}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="bar-chart-x-axis">
-                      <span>Jun</span>
-                      <span>Jul</span>
-                      <span>Ago</span>
-                      <span>Sep</span>
-                      <span>Oct</span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem', justifyContent: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', fontWeight: 600 }}>
-                      <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: 'var(--secondary)' }}></div>
-                      <span>Ingresos</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', fontWeight: 600 }}>
-                      <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: '#5C6F68' }}></div>
-                      <span>Gastos</span>
-                    </div>
-                  </div>
+                  <button 
+                    onClick={() => seleccionarApicultor('e37fb194-9e25-5d90-b912-9925001072c0')}
+                    className="font-title"
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      backgroundColor: 'var(--secondary)',
+                      color: '#FFFFFF',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      border: 'none',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    Ver Ficha Completa de Ruiz
+                  </button>
                 </div>
 
-                {/* Distribución por Tipo de Miel */}
+                {/* Distribución por Tipo de Floración */}
                 <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                   <div>
-                    <h3 className="font-title" style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-title)', marginBottom: '0.5rem' }}>Distribución por Tipo</h3>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Porcentaje del stock de miel física en depósito según floración.</p>
+                    <h3 className="font-title" style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-title)', marginBottom: '0.5rem' }}>Distribución por Floración</h3>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Porcentaje del stock de miel física en depósito según la floración registrada.</p>
                   </div>
                   
                   <div className="donut-chart-wrapper">
-                    {/* SVG Donut */}
                     <div style={{ position: 'relative', width: '120px', height: '120px', flexShrink: 0 }}>
                       <svg width="120" height="120" viewBox="0 0 42 42" className="donut">
                         <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#EFEDED" strokeWidth="4.5"></circle>
-                        {/* Multiflora 65% (stroke-dasharray: 65 35, stroke-dashoffset: 25) */}
-                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--secondary)" strokeWidth="4.5" strokeDasharray="65 35" strokeDashoffset="25"></circle>
-                        {/* Eucalipto 25% (stroke-dasharray: 25 75, stroke-dashoffset: 60) */}
-                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--primary)" strokeWidth="4.5" strokeDasharray="25 75" strokeDashoffset="60"></circle>
-                        {/* Azahar 10% (stroke-dasharray: 10 90, stroke-dashoffset: 35) */}
-                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--secondary-container)" strokeWidth="4.5" strokeDasharray="10 90" strokeDashoffset="35"></circle>
+                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--secondary)" strokeWidth="4.5" strokeDasharray="90 10" strokeDashoffset="25"></circle>
+                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--primary)" strokeWidth="4.5" strokeDasharray="10 90" strokeDashoffset="35"></circle>
                       </svg>
                       <div style={{
                         position: 'absolute',
@@ -780,22 +773,18 @@ function App() {
                         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                         lineHeight: 1
                       }}>
-                        <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)' }}>28.4k</span>
+                        <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)' }}>{(globalStats.totalKilosMiel / 1000).toFixed(0)}k</span>
                         <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', fontWeight: 700, marginTop: '2px' }}>KILOS</span>
                       </div>
                     </div>
 
                     <div className="donut-chart-legend">
                       <div className="donut-legend-item">
-                        <span><span className="donut-legend-color" style={{ backgroundColor: 'var(--secondary)' }}></span>Multiflora</span>
-                        <strong className="font-mono">65%</strong>
+                        <span><span className="donut-legend-color" style={{ backgroundColor: 'var(--secondary)' }}></span>Multiflora / Pradera</span>
+                        <strong className="font-mono">90%</strong>
                       </div>
                       <div className="donut-legend-item">
                         <span><span className="donut-legend-color" style={{ backgroundColor: 'var(--primary)' }}></span>Eucalipto</span>
-                        <strong className="font-mono">25%</strong>
-                      </div>
-                      <div className="donut-legend-item">
-                        <span><span className="donut-legend-color" style={{ backgroundColor: 'var(--secondary-container)' }}></span>Azahar</span>
                         <strong className="font-mono">10%</strong>
                       </div>
                     </div>
@@ -804,56 +793,52 @@ function App() {
 
               </div>
 
-              {/* Transacciones Globales Recientes */}
+              {/* Catálogo de Insumos y Productos (Geomiel) */}
               <section className="card-premium">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
                   <h3 className="font-title" style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-title)' }}>
-                    Transacciones Globales Recientes
+                    Catálogo de Insumos y Productos (Geomiel)
                   </h3>
-                  <span className="badge badge-info">En Vivo</span>
+                  <span className="badge badge-info">{productos.length} Productos</span>
                 </div>
 
-                <div className="table-container">
+                <div className="table-container" style={{ maxHeight: '280px', overflowY: 'auto' }}>
                   <table className="table-premium">
                     <thead>
                       <tr>
-                        <th className="font-title">ID REF</th>
-                        <th className="font-title">BENEFICIARIO / CLIENTE</th>
-                        <th className="font-title">TIPO</th>
-                        <th className="font-title">MÉTODO</th>
-                        <th className="font-title">ESTADO</th>
-                        <th className="font-title text-right">MONTO</th>
+                        <th className="font-title">Código</th>
+                        <th className="font-title">Categoría</th>
+                        <th className="font-title">Producto</th>
+                        <th className="font-title">Descripción</th>
+                        <th className="font-title text-right">Unidad</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {[
-                        { id: 'TXN-9021', name: 'Exportadora del Sur', desc: 'Mercado Internacional', tipo: 'VENTA', met: 'Transferencia SWIFT', est: 'Completado', mon: 35000 },
-                        { id: 'TXN-8984', name: 'Logística Abeja Real', desc: 'Flete Terrestre Carga', tipo: 'GASTO', met: 'Tarjeta Corp.', est: 'En Proceso', mon: 4200 },
-                        { id: 'TXN-8952', name: 'Suministros Apícolas S.A.', desc: 'Insumos de Extracción', tipo: 'SUMINISTRO', met: 'Crédito Directo', est: 'Completado', mon: 12800 },
-                        { id: 'TXN-8931', name: 'Distribuidora Naturalis', desc: 'Retail National Packs', tipo: 'VENTA', met: 'Pago en Línea', est: 'Completado', mon: 22500 }
-                      ].map((tx) => (
-                        <tr key={tx.id} className="table-row-hover">
-                          <td className="font-mono" style={{ color: 'var(--text-secondary)' }}>{tx.id}</td>
-                          <td>
-                            <strong style={{ display: 'block', color: 'var(--text-title)' }}>{tx.name}</strong>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{tx.desc}</span>
-                          </td>
-                          <td>
-                            <span className={`badge ${tx.tipo === 'VENTA' ? 'badge-success' : tx.tipo === 'GASTO' ? 'badge-danger' : 'badge-amber'}`}>
-                              {tx.tipo}
-                            </span>
-                          </td>
-                          <td style={{ color: 'var(--text-secondary)' }}>{tx.met}</td>
-                          <td>
-                            <span className={`badge ${tx.est === 'Completado' ? 'badge-success' : 'badge-amber'}`}>
-                              {tx.est}
-                            </span>
-                          </td>
-                          <td className="font-mono text-right" style={{ fontWeight: 700, color: tx.tipo === 'VENTA' ? '#137333' : 'var(--text-title)' }}>
-                            {tx.tipo === 'VENTA' ? '+' : '-'}${tx.mon.toLocaleString('es-AR')}.00
+                      {productos.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
+                            Cargando catálogo de productos...
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        productos.map((prod) => (
+                          <tr key={prod.codigo} className="table-row-hover">
+                            <td className="font-mono" style={{ color: 'var(--text-secondary)' }}>{prod.codigo}</td>
+                            <td>
+                              <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>
+                                {prod.categoria}
+                              </span>
+                            </td>
+                            <td>
+                              <strong style={{ color: 'var(--text-title)' }}>{prod.producto}</strong>
+                            </td>
+                            <td style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{prod.descripcion}</td>
+                            <td className="font-mono text-right" style={{ fontWeight: 700, color: 'var(--text-title)' }}>
+                              {prod.unidad}
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -864,7 +849,7 @@ function App() {
             {/* Columna Lateral Derecha (Sidebar Ejecutivo) */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               
-              {/* Perspectiva de Cosecha Q4 */}
+              {/* Proyección e Información de Acopio */}
               <div className="card-premium" style={{
                 backgroundColor: 'var(--primary-container)',
                 color: '#FFFFFF',
@@ -876,16 +861,16 @@ function App() {
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <TrendingUp size={20} style={{ color: 'var(--secondary-container)' }} />
-                  <span className="label-caps" style={{ color: 'var(--secondary-container)', fontSize: '0.65rem' }}>Proyección de Cosecha</span>
+                  <span className="label-caps" style={{ color: 'var(--secondary-container)', fontSize: '0.65rem' }}>Acopio General</span>
                 </div>
                 <h3 className="font-title" style={{ fontSize: '1.4rem', fontWeight: 800, lineHeight: 1.2 }}>
-                  Perspectiva de Cosecha Q4
+                  Perspectiva de Cosecha 2026
                 </h3>
                 <p style={{ fontSize: '0.85rem', color: '#B3C4BF', lineHeight: 1.4 }}>
-                  Se espera un alto rendimiento para las variedades de Eucalipto basado en los informes biométricos y climáticos actuales de la región.
+                  Se proyecta un incremento del 15% en el volumen de acopio de miel multiflora debido a condiciones climáticas favorables en la zona de General Pico y La Pampa.
                 </p>
                 <button 
-                  onClick={() => alert('Descargando modelo predictivo Q4.')}
+                  onClick={() => alert('Descargando Guía de Calidad Geomiel.')}
                   style={{
                     backgroundColor: 'var(--secondary-container)',
                     color: 'var(--primary)',
@@ -894,61 +879,26 @@ function App() {
                     fontWeight: 700,
                     fontSize: '0.85rem',
                     textAlign: 'center',
-                    marginTop: '0.5rem'
+                    marginTop: '0.5rem',
+                    border: 'none',
+                    cursor: 'pointer'
                   }}
                 >
-                  Descargar Modelo Predictivo
+                  Guía de Buenas Prácticas Apícolas
                 </button>
               </div>
 
-              {/* Alertas SRM e Incumplimientos */}
+              {/* Alertas SRM e Incumplimientos de Calidad */}
               <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
                   <Bell size={18} style={{ color: 'var(--danger)' }} />
-                  <h4 className="font-title" style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-title)' }}>Alertas de Control</h4>
+                  <h4 className="font-title" style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-title)' }}>Alertas de Control de Calidad</h4>
                 </div>
 
-                {/* Alerta Presupuesto */}
-                <div style={{
-                  backgroundColor: 'var(--danger-light)',
-                  border: '1px solid rgba(186, 26, 26, 0.1)',
-                  borderRadius: '12px',
-                  padding: '0.875rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.25rem'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <strong style={{ fontSize: '0.75rem', color: 'var(--danger-dark)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Alerta de Presupuesto</strong>
-                    <span style={{ fontSize: '0.65rem', backgroundColor: '#F87171', color: '#FFFFFF', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>CRÍTICO</span>
-                  </div>
-                  <strong style={{ fontSize: '0.8rem', color: 'var(--text-title)', marginTop: '0.25rem' }}>EXCESO DE PRESUPUESTO</strong>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.3 }}>
-                    El gasto en Logística excedió el límite proyectado para Octubre (+15%). Requiere revisión del CFO.
-                  </p>
-                </div>
-
-                {/* Alerta Cobro Pendiente */}
-                <div style={{
-                  backgroundColor: '#FFFBEB',
-                  border: '1px solid rgba(217, 119, 6, 0.1)',
-                  borderRadius: '12px',
-                  padding: '0.875rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.25rem'
-                }}>
-                  <strong style={{ fontSize: '0.75rem', color: '#B45309', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Cobro Pendiente</strong>
-                  <strong style={{ fontSize: '0.8rem', color: 'var(--text-title)', marginTop: '0.25rem' }}>EXPORTADORA DEL SUR</strong>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.3 }}>
-                    Pago de $12.4k programado para procesamiento automático el 15/10.
-                  </p>
-                </div>
-
-                {/* Alertas dinámicas de apicultores (incidencias de calidad) */}
-                {globalStats.incidencias.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
-                    <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Calidad de Proveedores</span>
+                {/* Alertas dinámicas de apicultores (incidencias de calidad de Supabase) */}
+                {globalStats.incidencias.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>{"Parámetros Excedidos (Humedad >18% / HMF >40)"}</span>
                     {globalStats.incidencias.map((inc) => (
                       <div 
                         key={inc.id} 
@@ -958,9 +908,9 @@ function App() {
                         }}
                         style={{
                           backgroundColor: '#FFF5F5',
-                          borderLeft: '3px solid var(--danger)',
+                          borderLeft: '4px solid var(--danger)',
                           borderRadius: '8px',
-                          padding: '0.5rem 0.75rem',
+                          padding: '0.625rem 0.75rem',
                           cursor: 'pointer',
                           display: 'flex',
                           justifyContent: 'space-between',
@@ -968,20 +918,39 @@ function App() {
                         }}
                       >
                         <div>
-                          <strong style={{ fontSize: '0.75rem', color: 'var(--text-title)', display: 'block' }}>{inc.apicultor_nombre}</strong>
-                          <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Humedad: {inc.humedad}%</span>
+                          <strong style={{ fontSize: '0.8rem', color: 'var(--text-title)', display: 'block' }}>{inc.apicultor_nombre}</strong>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--danger-dark)', fontWeight: 600 }}>
+                            Humedad: {inc.humedad}% | HMF: {inc.hmf} mg/kg
+                          </span>
                         </div>
                         <ChevronRight size={14} style={{ color: 'var(--text-secondary)' }} />
                       </div>
                     ))}
                   </div>
+                ) : (
+                  <div style={{
+                    backgroundColor: '#ECFDF5',
+                    border: '1px solid #A7F3D0',
+                    borderRadius: '12px',
+                    padding: '1rem',
+                    textAlign: 'center',
+                    color: '#065F46',
+                    fontSize: '0.8rem',
+                    lineHeight: 1.4
+                  }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '24px', color: '#059669', marginBottom: '0.25rem', display: 'block' }}>check_circle</span>
+                    <strong>Todo en Orden</strong>
+                    <p style={{ marginTop: '0.25rem', color: '#047857' }}>
+                      No se registran alertas de calidad de miel. Todas las entregas cumplen con Humedad &lt; 18.0% y HMF &lt; 40.0 mg/kg.
+                    </p>
+                  </div>
                 )}
               </div>
 
-              {/* Directrices de Gobernanza */}
+              {/* Directrices de Calidad y Acopio */}
               <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <h4 className="font-title" style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-title)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-                  Directrices de Gobernanza
+                  Directrices de Calidad y Acopio
                 </h4>
                 <ul style={{
                   paddingLeft: '1.25rem',
@@ -992,9 +961,10 @@ function App() {
                   gap: '0.5rem',
                   lineHeight: 1.4
                 }}>
-                  <li>Mantener la liquidez operativa por encima del 15% del total auditado.</li>
-                  <li>Auditoría externa trimestral mandatoria de todas las cuentas de apicultores.</li>
-                  <li>Exigir reporte RENAPA actualizado para liquidaciones mayores a $10k USD.</li>
+                  <li>Límite de humedad máximo permitido: 18.0%.</li>
+                  <li>Límite de HMF (Hidroximetilfurfural) máximo permitido: 40.0 mg/kg.</li>
+                  <li>Control estricto de residuos y antibióticos por lote de tambores antes de exportación.</li>
+                  <li>Los envases prestados deben devolverse en un plazo máximo de 180 días.</li>
                 </ul>
               </div>
 
