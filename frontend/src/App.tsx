@@ -14,7 +14,8 @@ import {
   Truck,
   DollarSign,
   TrendingUp,
-  ChevronRight
+  ChevronRight,
+  Trello
 } from 'lucide-react';
 import { srmService } from './services/srmService';
 import { isMockMode } from './services/supabaseClient';
@@ -26,7 +27,7 @@ function App() {
   // Estados de navegación y datos
   const [apicultores, setApicultores] = useState<Apicultor[]>([]);
   const [apicultorSeleccionado, setApicultorSeleccionado] = useState<ApicultorCompleto | null>(null);
-  const [view, setView] = useState<'dashboard' | 'directorio' | 'detail'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'directorio' | 'detail' | 'alertas' | 'embudo'>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [filtroAlerta, setFiltroAlerta] = useState(false);
   const [activeTab, setActiveTab] = useState<'general' | 'entregas' | 'envases' | 'cuenta_corriente' | 'operculo'>('general');
@@ -68,7 +69,10 @@ function App() {
     provincia: '',
     dni: '',
     renapa: '',
-    telefono: ''
+    telefono: '',
+    etapa: 'ACTIVO' as 'PROSPECTO' | 'CONTACTADO' | 'NEGOCIANDO' | 'ACTIVO',
+    tag: 'PRODUCTOR',
+    notas_onboarding: ''
   });
   const [newEntregaForm, setNewEntregaForm] = useState({ pfund: 34, humedad: 17.5, hmf: 10, tambores: 5, kilos: 1500 });
   const [newEnvaseForm, setNewEnvaseForm] = useState({ tipo: 'PRESTAMO' as 'PRESTAMO' | 'DEVOLUCION', cantidad: 10, obs: '' });
@@ -100,6 +104,37 @@ function App() {
   const [precioMielUsd, setPrecioMielUsd] = useState<number>(1.0);
   const [ventaKilos, setVentaKilos] = useState<number>(1000);
   const [ventaPrecioRef, setVentaPrecioRef] = useState<number>(1700);
+
+  // Estados para el Embudo de Proveedores (Kanban)
+  const [activeEmbudoTab, setActiveEmbudoTab] = useState<'embudo' | 'notas_feed'>('embudo');
+  const [apicultorParaEditarEtapa, setApicultorParaEditarEtapa] = useState<Apicultor | null>(null);
+  const [showQuickEditOnboardingModal, setShowQuickEditOnboardingModal] = useState(false);
+  const [quickEditForm, setQuickEditForm] = useState({
+    nombre: '',
+    cuit: '',
+    localidad: '',
+    cod_api: '',
+    provincia: '',
+    dni: '',
+    renapa: '',
+    telefono: '',
+    etapa: 'PROSPECTO' as 'PROSPECTO' | 'CONTACTADO' | 'NEGOCIANDO' | 'ACTIVO',
+    tag: 'PRODUCTOR',
+    notas_onboarding: ''
+  });
+
+  // Estado para la validación de RENAPA
+  const [renapaStatus, setRenapaStatus] = useState<{
+    type: 'idle' | 'loading' | 'success' | 'warning' | 'error';
+    message: string;
+    showWhatsappBtn?: boolean;
+    whatsappText?: string;
+  }>({ type: 'idle', message: '' });
+
+  // Resetear estado del validador de RENAPA al abrir o cerrar modals
+  useEffect(() => {
+    setRenapaStatus({ type: 'idle', message: '' });
+  }, [showAddApicultor, showQuickEditOnboardingModal]);
 
   // Efecto para auto-calcular montos, miel equivalente y detalles de Cuenta Corriente reactivamente
   useEffect(() => {
@@ -218,7 +253,10 @@ function App() {
         newApicultorForm.provincia,
         newApicultorForm.dni,
         newApicultorForm.renapa,
-        newApicultorForm.telefono
+        newApicultorForm.telefono,
+        newApicultorForm.etapa,
+        newApicultorForm.tag,
+        newApicultorForm.notas_onboarding
       );
       setNewApicultorForm({
         nombre: '',
@@ -228,13 +266,393 @@ function App() {
         provincia: '',
         dni: '',
         renapa: '',
-        telefono: ''
+        telefono: '',
+        etapa: 'ACTIVO',
+        tag: 'PRODUCTOR',
+        notas_onboarding: ''
       });
       setShowAddApicultor(false);
       cargarApicultores();
     } catch (err) {
       alert('Error creando apicultor: ' + err);
     }
+  };
+
+  const handleVerificarRenapa = async (
+    cuit: string, 
+    nombreApicultor: string, 
+    telefonoApicultor: string, 
+    setFormValues: (values: { nombre: string; renapa: string; provincia: string; localidad: string }) => void
+  ) => {
+    if (!cuit || cuit.trim() === '') {
+      setRenapaStatus({ type: 'error', message: 'Por favor, ingrese un CUIT para verificar.' });
+      return;
+    }
+    
+    setRenapaStatus({ type: 'loading', message: 'Consultando padrón público de RENAPA...' });
+    try {
+      const res = await srmService.consultarRenapa(cuit);
+      if (res.Result === 'OK' && res.Records && res.Records.length > 0) {
+        const record = res.Records[0];
+        
+        // Autocompletar campos en el formulario
+        setFormValues({
+          nombre: record.RazonSocial || nombreApicultor,
+          renapa: record.NumeroRenapa || '',
+          provincia: record.Provincia || '',
+          localidad: record.Localidad || ''
+        });
+
+        // Analizar fecha de vencimiento y estado
+        let isVencido = false;
+        
+        if (record.FechaVencimiento) {
+          const parts = record.FechaVencimiento.split('/');
+          if (parts.length === 3) {
+            const expDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+            if (expDate < new Date()) {
+              isVencido = true;
+            }
+          }
+        }
+        
+        if (record.Estado && record.Estado !== 'Vigente') {
+          isVencido = true;
+        }
+
+        if (isVencido) {
+          const phone = telefonoApicultor || record.Telefono || '';
+          const cleanPhone = phone.replace(/[^\d]/g, '');
+          const encodedMsg = encodeURIComponent(
+            `Hola ${nombreApicultor || record.RazonSocial || 'Productor'}, te contactamos desde el equipo de Geomiel. Te escribimos para comentarte que tu RENAPA número ${record.NumeroRenapa || ''} figura como Vencido (con fecha de vencimiento el ${record.FechaVencimiento || ''}). Te solicitamos que procedas a su renovación para poder mantener al día tu registro y continuar operando normalmente. ¡Muchas gracias!`
+          );
+          const waUrl = `https://wa.me/${cleanPhone}?text=${encodedMsg}`;
+
+          setRenapaStatus({
+            type: 'warning',
+            message: `Registro encontrado en RENAPA, pero está VENCIDO (Estado: ${record.Estado || 'No Vigente'}, Vence: ${record.FechaVencimiento || 'S/D'}). Se autocompletaron los campos.`,
+            showWhatsappBtn: !!phone,
+            whatsappText: waUrl
+          });
+        } else {
+          setRenapaStatus({
+            type: 'success',
+            message: `Registro encontrado y VIGENTE en RENAPA (Nro: ${record.NumeroRenapa || 'S/D'}, Vence: ${record.FechaVencimiento || 'S/D'}). Se autocompletaron los campos.`
+          });
+        }
+      } else {
+        setRenapaStatus({
+          type: 'error',
+          message: 'No se encontró ningún registro para el CUIT ingresado en el padrón de RENAPA.'
+        });
+      }
+    } catch (err) {
+      setRenapaStatus({
+        type: 'error',
+        message: 'Error al consultar RENAPA: ' + err
+      });
+    }
+  };
+
+  const handleUpdateApicultorStage = async (id: string, newEtapa: 'PROSPECTO' | 'CONTACTADO' | 'NEGOCIANDO' | 'ACTIVO') => {
+    try {
+      await srmService.updateApicultor(id, { etapa: newEtapa });
+      cargarApicultores();
+    } catch (err) {
+      alert('Error al actualizar etapa: ' + err);
+    }
+  };
+
+  const handleOpenQuickEdit = (a: Apicultor) => {
+    setApicultorParaEditarEtapa(a);
+    setQuickEditForm({
+      nombre: a.nombre || '',
+      cuit: a.cuit || '',
+      localidad: a.localidad || '',
+      cod_api: a.cod_api || '',
+      provincia: a.provincia || '',
+      dni: a.dni || '',
+      renapa: a.renapa || '',
+      telefono: a.telefono || '',
+      etapa: (a.etapa || 'ACTIVO') as any,
+      tag: a.tag || 'PRODUCTOR',
+      notas_onboarding: a.notas_onboarding || ''
+    });
+    setShowQuickEditOnboardingModal(true);
+  };
+
+  const handleSaveQuickEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!apicultorParaEditarEtapa) return;
+    try {
+      await srmService.updateApicultor(apicultorParaEditarEtapa.id, {
+        nombre: quickEditForm.nombre,
+        cuit: quickEditForm.cuit,
+        localidad: quickEditForm.localidad,
+        cod_api: quickEditForm.cod_api,
+        provincia: quickEditForm.provincia,
+        dni: quickEditForm.dni,
+        renapa: quickEditForm.renapa,
+        telefono: quickEditForm.telefono,
+        etapa: quickEditForm.etapa,
+        tag: quickEditForm.tag,
+        notas_onboarding: quickEditForm.notas_onboarding
+      });
+      setShowQuickEditOnboardingModal(false);
+      setApicultorParaEditarEtapa(null);
+      cargarApicultores();
+    } catch (err) {
+      alert('Error actualizando perfil: ' + err);
+    }
+  };
+
+  const renderEmbudoColumna = (
+    stage: 'PROSPECTO' | 'CONTACTADO' | 'NEGOCIANDO' | 'ACTIVO', 
+    color: string, 
+    bgColor: string,
+    borderColor: string,
+    customTitle?: string
+  ) => {
+    const list = apicultores.filter(a => {
+      const currentEtapa = a.etapa || 'ACTIVO';
+      return currentEtapa === stage;
+    });
+
+    return (
+      <div className="card-premium" style={{ 
+        padding: '1rem', 
+        backgroundColor: bgColor, 
+        border: `1px solid ${borderColor}`,
+        borderTop: `4px solid ${color}`,
+        display: 'flex', 
+        flexDirection: 'column', 
+        gap: '0.85rem',
+        minHeight: '450px',
+        borderRadius: '12px'
+      }}>
+        {/* Encabezado de la columna */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: color, display: 'inline-block' }} />
+            <strong style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-title)', letterSpacing: '0.05em' }}>
+              {customTitle || stage}
+            </strong>
+          </div>
+          <span style={{
+            fontSize: '0.75rem',
+            fontWeight: 700,
+            backgroundColor: color,
+            color: '#FFFFFF',
+            width: '20px',
+            height: '20px',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            {list.length}
+          </span>
+        </div>
+
+        {/* Lista de Tarjetas */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {list.length === 0 ? (
+            <div style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)', padding: '2rem 0', border: '1px dashed #ECEAE9', borderRadius: '8px', backgroundColor: '#FFFFFF' }}>
+              Sin proveedores
+            </div>
+          ) : (
+            list.map(a => {
+              const letter = a.nombre ? a.nombre.charAt(0).toUpperCase() : 'P';
+              const labelTag = a.tag || 'PRODUCTOR';
+              
+              let tagBg = '#FEF3C7';
+              let tagColor = '#92400E';
+              if (labelTag === 'REVENDEDOR') { tagBg = '#D1FAE5'; tagColor = '#065F46'; }
+              else if (labelTag === 'NEGOCIOS') { tagBg = '#DBEAFE'; tagColor = '#1E40AF'; }
+              else if (labelTag === 'ACOPIADOR') { tagBg = '#F3E8FF'; tagColor = '#6B21A8'; }
+
+              return (
+                <div 
+                  key={a.id} 
+                  className="card-premium" 
+                  style={{ 
+                    padding: '0.85rem', 
+                    backgroundColor: '#FFFFFF', 
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.03)',
+                    borderLeft: `4px solid ${color}`,
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    gap: '0.5rem',
+                    borderRadius: '8px'
+                  }}
+                >
+                  {/* Fila 1: Avatar, Nombre y Tag */}
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
+                      backgroundColor: 'rgba(8, 32, 26, 0.05)',
+                      color: 'var(--primary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
+                      flexShrink: 0
+                    }}>
+                      {letter}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', overflow: 'hidden', flex: 1 }}>
+                      <strong 
+                        style={{ fontSize: '0.85rem', color: 'var(--text-title)', cursor: 'pointer', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}
+                        onClick={() => {
+                          if (stage === 'ACTIVO') seleccionarApicultor(a.id);
+                          else handleOpenQuickEdit(a);
+                        }}
+                        title={a.nombre}
+                      >
+                        {a.nombre}
+                      </strong>
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap' }}>
+                        <span style={{
+                          fontSize: '0.6rem',
+                          padding: '0.1rem 0.35rem',
+                          borderRadius: '4px',
+                          fontWeight: 700,
+                          backgroundColor: tagBg,
+                          color: tagColor,
+                          textTransform: 'uppercase'
+                        }}>
+                          {labelTag}
+                        </span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                          {a.localidad || 'S/D'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Fila 2: WhatsApp si tiene telefono */}
+                  {a.telefono && (
+                    <a 
+                      href={`https://wa.me/${a.telefono.replace(/[^\d]/g, '')}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        alignSelf: 'flex-start',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.375rem',
+                        padding: '0.25rem 0.625rem',
+                        borderRadius: '9999px',
+                        backgroundColor: '#E8F5E9',
+                        border: '1px solid #C8E6C9',
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        color: '#2E7D32',
+                        textDecoration: 'none',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#C8E6C9'; }}
+                      onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#E8F5E9'; }}
+                    >
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4CAF50', display: 'inline-block' }} />
+                      WhatsApp
+                    </a>
+                  )}
+
+                  {/* Fila 3: Notas rápidas */}
+                  {a.notas_onboarding && (
+                    <p style={{ 
+                      fontSize: '0.75rem', 
+                      color: 'var(--text-secondary)', 
+                      margin: 0, 
+                      lineHeight: 1.3,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                      backgroundColor: '#FAFBFD',
+                      padding: '0.35rem',
+                      borderRadius: '4px',
+                      border: '1px solid #ECEAE9'
+                    }} title={a.notas_onboarding}>
+                      {a.notas_onboarding}
+                    </p>
+                  )}
+
+                  {/* Selector de Etapa */}
+                  <div style={{ marginTop: '0.25rem', display: 'flex', gap: '0.25rem', width: '100%' }}>
+                    <select 
+                      style={{ 
+                        flex: 1, 
+                        padding: '0.35rem', 
+                        borderRadius: '6px', 
+                        border: '1px solid var(--border-color)', 
+                        fontSize: '0.75rem', 
+                        backgroundColor: '#FFFFFF',
+                        fontWeight: 600,
+                        color: 'var(--text-body)'
+                      }}
+                      value={stage}
+                      onChange={e => handleUpdateApicultorStage(a.id, e.target.value as any)}
+                    >
+                      <option value="PROSPECTO">Prospecto</option>
+                      <option value="CONTACTADO">Contactado</option>
+                      <option value="NEGOCIANDO">Negociando</option>
+                      <option value="ACTIVO">Proveedor Activo</option>
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={() => handleOpenQuickEdit(a)}
+                      title="Editar Ficha"
+                      style={{
+                        padding: '0.35rem',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: '#FAFBFD',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--text-secondary)'
+                      }}
+                    >
+                      ✏️
+                    </button>
+                    {stage === 'ACTIVO' && (
+                      <button
+                        type="button"
+                        onClick={() => seleccionarApicultor(a.id)}
+                        title="Ver Ficha 360°"
+                        style={{
+                          padding: '0.35rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-color)',
+                          backgroundColor: 'var(--primary)',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#FFFFFF',
+                          fontWeight: 'bold',
+                          fontSize: '0.75rem'
+                        }}
+                      >
+                        🍯
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
   };
 
   const handleCreateEntrega = async (e: React.FormEvent) => {
@@ -367,6 +785,11 @@ function App() {
 
   // Apicultores filtrados
   const apicultoresFiltrados = apicultores.filter(a => {
+    const currentEtapa = a.etapa || 'ACTIVO';
+    if (view === 'directorio' && currentEtapa !== 'ACTIVO') {
+      return false;
+    }
+
     const matchesSearch = 
       a.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
       a.cuit.includes(searchQuery) ||
@@ -469,7 +892,7 @@ function App() {
                 <Users size={18} />
                 <span>Red de Proveedores</span>
               </div>
-              {apicultores.length > 0 && (
+              {apicultores.filter(a => (a.etapa || 'ACTIVO') === 'ACTIVO').length > 0 && (
                 <span className="font-mono" style={{
                   fontSize: '0.75rem',
                   backgroundColor: 'rgba(8,32,26,0.05)',
@@ -478,9 +901,33 @@ function App() {
                   borderRadius: '9999px',
                   fontWeight: 700
                 }}>
-                  {apicultores.length}
+                  {apicultores.filter(a => (a.etapa || 'ACTIVO') === 'ACTIVO').length}
                 </span>
               )}
+            </button>
+
+            <button 
+              onClick={() => { setView('embudo'); setApicultorSeleccionado(null); setFiltroAlerta(false); setMobileMenuOpen(false); }}
+              className="font-title"
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.75rem 1rem',
+                borderRadius: view === 'embudo' ? '0 var(--radius-sm) var(--radius-sm) 0' : 'var(--radius-sm)',
+                fontWeight: 600,
+                fontSize: '0.9rem',
+                backgroundColor: view === 'embudo' ? 'var(--bg-sidebar-active)' : 'transparent',
+                color: view === 'embudo' ? 'var(--primary)' : 'var(--text-body)',
+                borderLeft: view === 'embudo' ? '4px solid var(--primary)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <Trello size={18} />
+                <span>Embudo de Proveedores</span>
+              </div>
             </button>
 
             <button 
@@ -633,22 +1080,26 @@ function App() {
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
                 <span style={{ textTransform: 'uppercase' }}>
-                  {view === 'dashboard' ? 'Finanzas' : view === 'directorio' ? 'Admin' : 'Registro'}
+                  {view === 'dashboard' ? 'Finanzas' : view === 'directorio' ? 'Admin' : view === 'embudo' ? 'Proceso' : view === 'alertas' ? 'Control' : 'Registro'}
                 </span>
                 <ChevronRight size={12} />
                 <span style={{ textTransform: 'uppercase', color: 'var(--secondary)' }}>
-                  {view === 'dashboard' ? 'Reportes Ejecutivos' : view === 'directorio' ? 'Apicultores' : 'Detalle de Apicultor'}
+                  {view === 'dashboard' ? 'Reportes Ejecutivos' : view === 'directorio' ? 'Apicultores' : view === 'embudo' ? 'Embudo de Proveedores' : view === 'alertas' ? 'Alertas e Incumplimientos' : 'Detalle de Apicultor'}
                 </span>
               </div>
               <h1 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', letterSpacing: '-0.02em', marginTop: '0.25rem' }}>
-                {view === 'dashboard' ? 'Inteligencia Financiera' : view === 'directorio' ? 'Panel de Gestión' : 'Ficha de Apicultor'}
+                {view === 'dashboard' ? 'Inteligencia Financiera' : view === 'directorio' ? 'Panel de Gestión' : view === 'embudo' ? 'Embudo de Incorporación' : view === 'alertas' ? 'Centro de Alertas y Desvíos' : 'Ficha de Apicultor'}
               </h1>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.125rem' }}>
                 {view === 'dashboard' 
                   ? 'Balance consolidado en tiempo real y rendimiento de ventas operativas de miel.'
                   : view === 'directorio'
                     ? 'Monitoreo en vivo de utilidades, análisis de mieles y control de tambores vacíos.'
-                    : 'Detalle consolidado de comportamiento, balances monetarios dobles y control analítico de calidad.'}
+                    : view === 'embudo'
+                      ? 'Gestión visual de prospectos y proveedores en proceso de negociación o activos.'
+                      : view === 'alertas'
+                        ? 'Detección automática de tambores sin analizar, vencimientos e inconsistencias operativas.'
+                        : 'Detalle consolidado de comportamiento, balances monetarios dobles y control analítico de calidad.'}
               </p>
             </div>
           </div>
@@ -695,9 +1146,22 @@ function App() {
               </>
             )}
             
-            {view === 'directorio' && (
+            {(view === 'directorio' || view === 'embudo') && (
               <button 
-                onClick={() => setShowAddApicultor(true)}
+                onClick={() => {
+                  if (view === 'embudo') {
+                    setNewApicultorForm(prev => ({
+                      ...prev,
+                      etapa: 'PROSPECTO'
+                    }));
+                  } else {
+                    setNewApicultorForm(prev => ({
+                      ...prev,
+                      etapa: 'ACTIVO'
+                    }));
+                  }
+                  setShowAddApicultor(true);
+                }}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -711,7 +1175,7 @@ function App() {
                 }}
               >
                 <Plus size={18} style={{ color: '#FFFFFF' }} />
-                Registrar Apicultor
+                {view === 'embudo' ? 'Registrar Prospecto' : 'Registrar Apicultor'}
               </button>
             )}
 
@@ -1397,6 +1861,170 @@ function App() {
               )}
             </section>
           </>
+        )}
+
+        {/* -------------------------------------------------------------------
+            VISTA DEL EMBUDO DE INCORPORACIÓN DE PROVEEDORES (KANBAN)
+            ------------------------------------------------------------------- */}
+        {view === 'embudo' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {/* Cabecera de Tabs del Embudo */}
+            <div style={{
+              display: 'flex',
+              gap: '1.5rem',
+              borderBottom: '2px solid var(--border-color)',
+              paddingBottom: '2px',
+              marginBottom: '0.5rem'
+            }}>
+              {[
+                { id: 'embudo', label: '🎯 EMBUDO DE PROVEEDORES' },
+                { id: 'notas_feed', label: '📝 NOTAS DE SEGUIMIENTO' }
+              ].map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setActiveEmbudoTab(t.id as any)}
+                  style={{
+                    padding: '0.75rem 0.5rem',
+                    fontWeight: 800,
+                    fontSize: '0.85rem',
+                    letterSpacing: '0.05em',
+                    whiteSpace: 'nowrap',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: activeEmbudoTab === t.id ? 'var(--secondary)' : 'var(--text-secondary)',
+                    borderBottom: activeEmbudoTab === t.id ? '3px solid var(--secondary)' : 'none',
+                    marginBottom: '-2px',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {activeEmbudoTab === 'embudo' && (
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', 
+                gap: '1rem',
+                alignItems: 'start'
+              }}>
+                {renderEmbudoColumna('PROSPECTO', '#9E9E9E', '#FAF9F8', '#EBEAE9', 'PROSPECTO')}
+                {renderEmbudoColumna('CONTACTADO', '#2196F3', '#F4F9FD', '#E3F2FD', 'CONTACTADO')}
+                {renderEmbudoColumna('NEGOCIANDO', '#FF9800', '#FFFBF2', '#FFF3E0', 'NEGOCIANDO')}
+                {renderEmbudoColumna('ACTIVO', '#4CAF50', '#F6FBF6', '#E8F5E9', 'PROVEEDOR ACTIVO')}
+              </div>
+            )}
+
+            {activeEmbudoTab === 'notas_feed' && (
+              <section className="card-premium" style={{ padding: '1.5rem' }}>
+                <h3 className="font-title" style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: '1.25rem', color: 'var(--text-title)' }}>
+                  Notas de Seguimiento de Incorporación
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {apicultores.filter(a => a.notas_onboarding && a.notas_onboarding.trim() !== '').length === 0 ? (
+                    <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '3rem' }}>
+                      No hay notas de seguimiento registradas para ningún proveedor.
+                    </div>
+                  ) : (
+                    apicultores
+                      .filter(a => a.notas_onboarding && a.notas_onboarding.trim() !== '')
+                      .map(a => {
+                        const letter = a.nombre ? a.nombre.charAt(0).toUpperCase() : 'P';
+                        const stage = a.etapa || 'ACTIVO';
+                        let stageColor = '#9E9E9E';
+                        if (stage === 'CONTACTADO') stageColor = '#2196F3';
+                        else if (stage === 'NEGOCIANDO') stageColor = '#FF9800';
+                        else if (stage === 'ACTIVO') stageColor = '#4CAF50';
+
+                        return (
+                          <div 
+                            key={a.id} 
+                            style={{ 
+                              padding: '1.25rem', 
+                              backgroundColor: '#FFFFFF', 
+                              borderRadius: '12px', 
+                              border: '1px solid var(--border-color)',
+                              borderLeft: `5px solid ${stageColor}`,
+                              boxShadow: '0 2px 6px rgba(0,0,0,0.02)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.75rem'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                <div style={{
+                                  width: '36px',
+                                  height: '36px',
+                                  borderRadius: '50%',
+                                  backgroundColor: 'rgba(8, 32, 26, 0.05)',
+                                  color: 'var(--primary)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontWeight: 700
+                                }}>
+                                  {letter}
+                                </div>
+                                <div>
+                                  <strong style={{ fontSize: '0.95rem', color: 'var(--text-title)' }}>{a.nombre}</strong>
+                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>
+                                    {a.localidad || 'Ubicación no declarada'}, {a.provincia || ''}
+                                  </span>
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <span style={{
+                                  fontSize: '0.7rem',
+                                  fontWeight: 700,
+                                  backgroundColor: stageColor,
+                                  color: '#FFFFFF',
+                                  padding: '0.2rem 0.6rem',
+                                  borderRadius: '4px',
+                                  textTransform: 'uppercase'
+                                }}>
+                                  {stage}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenQuickEdit(a)}
+                                  style={{
+                                    padding: '0.35rem 0.75rem',
+                                    borderRadius: '6px',
+                                    border: '1px solid var(--border-color)',
+                                    backgroundColor: '#FAFBFD',
+                                    cursor: 'pointer',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600,
+                                    color: 'var(--text-secondary)'
+                                  }}
+                                >
+                                  ✏️ Editar
+                                </button>
+                              </div>
+                            </div>
+                            <div style={{ 
+                              backgroundColor: '#FAFBFD', 
+                              padding: '1rem', 
+                              borderRadius: '8px', 
+                              border: '1px solid #ECEAE9',
+                              fontSize: '0.9rem',
+                              color: 'var(--text-body)',
+                              lineHeight: 1.4,
+                              whiteSpace: 'pre-wrap'
+                            }}>
+                              {a.notas_onboarding}
+                            </div>
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+              </section>
+            )}
+          </div>
         )}
 
         {/* -------------------------------------------------------------------
@@ -2101,12 +2729,44 @@ function App() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 <div>
                   <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>CUIT (formato 20-XXXXXXXX-9)</label>
-                  <input 
-                    type="text" required
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                    value={newApicultorForm.cuit}
-                    onChange={e => setNewApicultorForm({ ...newApicultorForm, cuit: e.target.value })}
-                  />
+                  <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.25rem' }}>
+                    <input 
+                      type="text" required
+                      style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}
+                      value={newApicultorForm.cuit}
+                      onChange={e => setNewApicultorForm({ ...newApicultorForm, cuit: e.target.value })}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleVerificarRenapa(
+                        newApicultorForm.cuit, 
+                        newApicultorForm.nombre,
+                        newApicultorForm.telefono,
+                        (vals) => setNewApicultorForm(prev => ({
+                          ...prev,
+                          nombre: vals.nombre || prev.nombre,
+                          renapa: vals.renapa || prev.renapa,
+                          provincia: vals.provincia || prev.provincia,
+                          localidad: vals.localidad || prev.localidad
+                        }))
+                      )}
+                      style={{
+                        padding: '0.5rem 0.75rem',
+                        backgroundColor: 'var(--primary)',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        borderRadius: 'var(--radius-sm)',
+                        fontWeight: 700,
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      🔍 Verificar
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>DNI</label>
@@ -2118,6 +2778,66 @@ function App() {
                   />
                 </div>
               </div>
+
+              {/* Indicador de Estado de RENAPA */}
+              {renapaStatus.type !== 'idle' && (
+                <div style={{
+                  padding: '0.75rem',
+                  borderRadius: '8px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem',
+                  backgroundColor: renapaStatus.type === 'loading' ? '#F5F5F5'
+                    : renapaStatus.type === 'success' ? '#E8F5E9'
+                    : renapaStatus.type === 'warning' ? '#FFF3E0'
+                    : '#FFE5E5',
+                  color: renapaStatus.type === 'loading' ? 'var(--text-secondary)'
+                    : renapaStatus.type === 'success' ? '#2E7D32'
+                    : renapaStatus.type === 'warning' ? '#E65100'
+                    : '#C62828',
+                  border: `1px solid ${
+                    renapaStatus.type === 'loading' ? '#E0E0E0'
+                      : renapaStatus.type === 'success' ? '#C8E6C9'
+                      : renapaStatus.type === 'warning' ? '#FFE0B2'
+                      : '#FFCDD2'
+                  }`
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <span>
+                      {renapaStatus.type === 'loading' ? '⌛'
+                        : renapaStatus.type === 'success' ? '✅'
+                        : renapaStatus.type === 'warning' ? '⚠️'
+                        : '❌'}
+                    </span>
+                    <span style={{ flex: 1 }}>{renapaStatus.message}</span>
+                  </div>
+                  {renapaStatus.type === 'warning' && renapaStatus.showWhatsappBtn && renapaStatus.whatsappText && (
+                    <a
+                      href={renapaStatus.whatsappText}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        alignSelf: 'flex-start',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.375rem',
+                        padding: '0.35rem 0.75rem',
+                        borderRadius: '6px',
+                        backgroundColor: '#2E7D32',
+                        color: '#FFFFFF',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        textDecoration: 'none',
+                        transition: 'background-color 0.15s ease'
+                      }}
+                    >
+                      💬 Avisar por WhatsApp
+                    </a>
+                  )}
+                </div>
+              )}
 
               {/* Fila: Código API y RENAPA */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -2171,6 +2891,48 @@ function App() {
                   style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
                   value={newApicultorForm.telefono}
                   onChange={e => setNewApicultorForm({ ...newApicultorForm, telefono: e.target.value })}
+                />
+              </div>
+
+              {/* Fila: Etapa del Embudo y Etiqueta Comercial */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Etapa en el Embudo</label>
+                  <select 
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
+                    value={newApicultorForm.etapa}
+                    onChange={e => setNewApicultorForm({ ...newApicultorForm, etapa: e.target.value as any })}
+                  >
+                    <option value="PROSPECTO">Prospecto (Lead)</option>
+                    <option value="CONTACTADO">Contactado</option>
+                    <option value="NEGOCIANDO">Negociando</option>
+                    <option value="ACTIVO">Proveedor Activo</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Etiqueta (Tag)</label>
+                  <select 
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
+                    value={newApicultorForm.tag}
+                    onChange={e => setNewApicultorForm({ ...newApicultorForm, tag: e.target.value })}
+                  >
+                    <option value="PRODUCTOR">Productor</option>
+                    <option value="REVENDEDOR">Revendedor</option>
+                    <option value="NEGOCIOS">Negocios</option>
+                    <option value="ACOPIADOR">Acopiador</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Notas de incorporación */}
+              <div>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Notas / Historial de Incorporación</label>
+                <textarea 
+                  rows={2}
+                  style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem', resize: 'vertical', fontFamily: 'inherit' }}
+                  placeholder="Ej: Reunión inicial en galpón. Solicita financiamiento inicial..."
+                  value={newApicultorForm.notas_onboarding}
+                  onChange={e => setNewApicultorForm({ ...newApicultorForm, notas_onboarding: e.target.value })}
                 />
               </div>
 
@@ -2726,6 +3488,252 @@ function App() {
                 </button>
                 <button type="submit" style={{ padding: '0.5rem 1rem', backgroundColor: 'var(--secondary)', color: '#FFFFFF', borderRadius: '8px', fontWeight: 600 }}>
                   Confirmar Registro
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edición Rápida y Registro de Notas de Incorporación (Embudo) */}
+      {showQuickEditOnboardingModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 999, padding: '1rem'
+        }}>
+          <div className="card-premium" style={{ width: '100%', maxWidth: '550px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <h3 className="font-title" style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)' }}>Editar Ficha de Incorporación</h3>
+            
+            <form onSubmit={handleSaveQuickEdit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Nombre completo */}
+              <div>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Nombre / Razón Social</label>
+                <input 
+                  type="text" required
+                  style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                  value={quickEditForm.nombre}
+                  onChange={e => setQuickEditForm({ ...quickEditForm, nombre: e.target.value })}
+                />
+              </div>
+
+              {/* Fila: CUIT y DNI */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>CUIT (formato 20-XXXXXXXX-9)</label>
+                  <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.25rem' }}>
+                    <input 
+                      type="text" required
+                      style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}
+                      value={quickEditForm.cuit}
+                      onChange={e => setQuickEditForm({ ...quickEditForm, cuit: e.target.value })}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleVerificarRenapa(
+                        quickEditForm.cuit, 
+                        quickEditForm.nombre,
+                        quickEditForm.telefono,
+                        (vals) => setQuickEditForm(prev => ({
+                          ...prev,
+                          nombre: vals.nombre || prev.nombre,
+                          renapa: vals.renapa || prev.renapa,
+                          provincia: vals.provincia || prev.provincia,
+                          localidad: vals.localidad || prev.localidad
+                        }))
+                      )}
+                      style={{
+                        padding: '0.5rem 0.75rem',
+                        backgroundColor: 'var(--primary)',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        borderRadius: 'var(--radius-sm)',
+                        fontWeight: 700,
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      🔍 Verificar
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>DNI</label>
+                  <input 
+                    type="text"
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    value={quickEditForm.dni}
+                    onChange={e => setQuickEditForm({ ...quickEditForm, dni: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {/* Indicador de Estado de RENAPA */}
+              {renapaStatus.type !== 'idle' && (
+                <div style={{
+                  padding: '0.75rem',
+                  borderRadius: '8px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem',
+                  backgroundColor: renapaStatus.type === 'loading' ? '#F5F5F5'
+                    : renapaStatus.type === 'success' ? '#E8F5E9'
+                    : renapaStatus.type === 'warning' ? '#FFF3E0'
+                    : '#FFE5E5',
+                  color: renapaStatus.type === 'loading' ? 'var(--text-secondary)'
+                    : renapaStatus.type === 'success' ? '#2E7D32'
+                    : renapaStatus.type === 'warning' ? '#E65100'
+                    : '#C62828',
+                  border: `1px solid ${
+                    renapaStatus.type === 'loading' ? '#E0E0E0'
+                      : renapaStatus.type === 'success' ? '#C8E6C9'
+                      : renapaStatus.type === 'warning' ? '#FFE0B2'
+                      : '#FFCDD2'
+                  }`
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <span>
+                      {renapaStatus.type === 'loading' ? '⌛'
+                        : renapaStatus.type === 'success' ? '✅'
+                        : renapaStatus.type === 'warning' ? '⚠️'
+                        : '❌'}
+                    </span>
+                    <span style={{ flex: 1 }}>{renapaStatus.message}</span>
+                  </div>
+                  {renapaStatus.type === 'warning' && renapaStatus.showWhatsappBtn && renapaStatus.whatsappText && (
+                    <a
+                      href={renapaStatus.whatsappText}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        alignSelf: 'flex-start',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.375rem',
+                        padding: '0.35rem 0.75rem',
+                        borderRadius: '6px',
+                        backgroundColor: '#2E7D32',
+                        color: '#FFFFFF',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        textDecoration: 'none',
+                        transition: 'background-color 0.15s ease'
+                      }}
+                    >
+                      💬 Avisar por WhatsApp
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {/* Fila: Código API y RENAPA */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Código API</label>
+                  <input 
+                    type="text"
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    value={quickEditForm.cod_api}
+                    onChange={e => setQuickEditForm({ ...quickEditForm, cod_api: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>RENAPA</label>
+                  <input 
+                    type="text"
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    value={quickEditForm.renapa}
+                    onChange={e => setQuickEditForm({ ...quickEditForm, renapa: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {/* Fila: Localidad y Provincia */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Localidad</label>
+                  <input 
+                    type="text"
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    value={quickEditForm.localidad}
+                    onChange={e => setQuickEditForm({ ...quickEditForm, localidad: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Provincia</label>
+                  <input 
+                    type="text"
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    value={quickEditForm.provincia}
+                    onChange={e => setQuickEditForm({ ...quickEditForm, provincia: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {/* Teléfono */}
+              <div>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Teléfono de Contacto</label>
+                <input 
+                  type="text"
+                  style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                  value={quickEditForm.telefono}
+                  onChange={e => setQuickEditForm({ ...quickEditForm, telefono: e.target.value })}
+                />
+              </div>
+
+              {/* Fila: Etapa del Embudo y Etiqueta Comercial */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Etapa en el Embudo</label>
+                  <select 
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
+                    value={quickEditForm.etapa}
+                    onChange={e => setQuickEditForm({ ...quickEditForm, etapa: e.target.value as any })}
+                  >
+                    <option value="PROSPECTO">Prospecto (Lead)</option>
+                    <option value="CONTACTADO">Contactado</option>
+                    <option value="NEGOCIANDO">Negociando</option>
+                    <option value="ACTIVO">Proveedor Activo</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Etiqueta (Tag)</label>
+                  <select 
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
+                    value={quickEditForm.tag}
+                    onChange={e => setQuickEditForm({ ...quickEditForm, tag: e.target.value })}
+                  >
+                    <option value="PRODUCTOR">Productor</option>
+                    <option value="REVENDEDOR">Revendedor</option>
+                    <option value="NEGOCIOS">Negocios</option>
+                    <option value="ACOPIADOR">Acopiador</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Notas de incorporación */}
+              <div>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Notas / Historial de Incorporación</label>
+                <textarea 
+                  rows={3}
+                  style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem', resize: 'vertical', fontFamily: 'inherit' }}
+                  placeholder="Ej: Reunión inicial en galpón. Solicita financiamiento inicial..."
+                  value={quickEditForm.notas_onboarding}
+                  onChange={e => setQuickEditForm({ ...quickEditForm, notas_onboarding: e.target.value })}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.75rem' }}>
+                <button type="button" onClick={() => { setShowQuickEditOnboardingModal(false); setApicultorParaEditarEtapa(null); }} style={{ padding: '0.5rem 1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', fontWeight: 600 }}>
+                  Cancelar
+                </button>
+                <button type="submit" style={{ padding: '0.5rem 1rem', backgroundColor: 'var(--primary)', color: '#FFFFFF', borderRadius: 'var(--radius-sm)', fontWeight: 700 }}>
+                  Guardar Cambios
                 </button>
               </div>
             </form>

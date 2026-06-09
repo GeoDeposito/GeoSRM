@@ -11,6 +11,9 @@ export interface Apicultor {
   renapa?: string;
   telefono?: string;
   puntuacion: number; // 0.00 to 5.00
+  etapa?: 'PROSPECTO' | 'CONTACTADO' | 'NEGOCIANDO' | 'ACTIVO';
+  tag?: string;
+  notas_onboarding?: string;
   created_at: string;
   updated_at: string;
 }

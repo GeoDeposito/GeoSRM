@@ -35,6 +35,9 @@ const MOCK_APICULTORES: Apicultor[] = [
     renapa: 'X4285',
     telefono: '0351-4829104',
     puntuacion: 4.8,
+    etapa: 'PROSPECTO',
+    tag: 'REVENDEDOR',
+    notas_onboarding: 'Interesado en retirar insumos de cera de opérculo. Primer contacto por recomendación.',
     created_at: new Date(2026, 4, 1).toISOString(),
     updated_at: new Date(2026, 4, 1).toISOString(),
   },
@@ -49,6 +52,9 @@ const MOCK_APICULTORES: Apicultor[] = [
     renapa: 'H1041',
     telefono: '03732-491048',
     puntuacion: 4.2,
+    etapa: 'CONTACTADO',
+    tag: 'NEGOCIOS',
+    notas_onboarding: 'Llamó consultando precio por acopio de multiflora. Se le envió lista de precios y contrato.',
     created_at: new Date(2026, 3, 15).toISOString(),
     updated_at: new Date(2026, 3, 15).toISOString(),
   },
@@ -63,6 +69,9 @@ const MOCK_APICULTORES: Apicultor[] = [
     renapa: 'L2251',
     telefono: '02302-429104',
     puntuacion: 5.0,
+    etapa: 'NEGOCIANDO',
+    tag: 'REVENDEDOR',
+    notas_onboarding: 'Negociando precio diferencial para lote grande de 100 tambores. Pendiente confirmar flete.',
     created_at: new Date(2026, 2, 10).toISOString(),
     updated_at: new Date(2026, 2, 10).toISOString(),
   }
@@ -201,8 +210,9 @@ const initializeLocalStorageMock = () => {
   const storedApics = localStorage.getItem('srm_apicultores');
   const hasRuiz = storedApics && storedApics.includes('e37fb194-9e25-5d90-b912-9925001072c0');
   const hasDuplicateRuiz = storedApics && (storedApics.includes('20-16194725-9') || storedApics.includes('Ruiz Ruben Oscar (G. Pico)'));
+  const needsEtapaUpgrade = !storedApics || !storedApics.includes('etapa');
 
-  if (!localStorage.getItem('srm_apicultores') || !hasRuiz || hasDuplicateRuiz) {
+  if (!localStorage.getItem('srm_apicultores') || !hasRuiz || hasDuplicateRuiz || needsEtapaUpgrade) {
     localStorage.setItem('srm_apicultores', JSON.stringify(combinedApicultores));
     localStorage.setItem('srm_entregas', JSON.stringify(combinedEntregas));
     localStorage.setItem('srm_tambores', JSON.stringify(combinedTambores));
@@ -352,7 +362,10 @@ export const srmService = {
     provincia?: string,
     dni?: string,
     renapa?: string,
-    telefono?: string
+    telefono?: string,
+    etapa: 'PROSPECTO' | 'CONTACTADO' | 'NEGOCIANDO' | 'ACTIVO' = 'ACTIVO',
+    tag: string = 'PRODUCTOR',
+    notas_onboarding: string = ''
   ): Promise<Apicultor> {
     if (isMockMode) {
       const apicultores = getMockData<Apicultor>('srm_apicultores');
@@ -366,6 +379,9 @@ export const srmService = {
         dni,
         renapa,
         telefono,
+        etapa,
+        tag,
+        notas_onboarding,
         puntuacion: 5.0,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -386,10 +402,97 @@ export const srmService = {
         dni,
         renapa,
         telefono,
+        etapa,
+        tag,
+        notas_onboarding,
         puntuacion: 5.0
       }])
       .select()
       .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async updateApicultor(
+    id: string,
+    updates: Partial<Apicultor>
+  ): Promise<Apicultor> {
+    if (isMockMode) {
+      const apicultores = getMockData<Apicultor>('srm_apicultores');
+      const idx = apicultores.findIndex(a => a.id === id);
+      if (idx === -1) throw new Error('Apicultor no encontrado');
+      const updated = {
+        ...apicultores[idx],
+        ...updates,
+        updated_at: new Date().toISOString()
+      };
+      apicultores[idx] = updated;
+      saveMockData('srm_apicultores', apicultores);
+      return updated;
+    }
+
+    const { data, error } = await supabase!
+      .from('apicultores')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async consultarRenapa(cuit: string): Promise<any> {
+    if (isMockMode) {
+      const cleanCuit = cuit.replace(/\D/g, '');
+      await new Promise(resolve => setTimeout(resolve, 800)); // Simular latencia de red
+      
+      if (cleanCuit === '20176726157') {
+        return {
+          Result: 'OK',
+          Records: [{
+            Cuit: '20176726157',
+            RazonSocial: 'RUIZ RUBEN OSCAR',
+            NumeroRenapa: 'L3461',
+            Provincia: 'LA PAMPA',
+            Partido: 'MARACO',
+            Localidad: 'GENERAL PICO',
+            FechaAprobacion: '03/11/2025',
+            FechaVencimiento: '03/11/2027',
+            Estado: 'Vigente',
+            IdSolicitud: 68941,
+            Constancia: true
+          }]
+        };
+      } else if (cleanCuit.startsWith('20') || cleanCuit.startsWith('27') || cleanCuit.startsWith('30')) {
+        const randomNum = Math.floor(Math.random() * 8000) + 1000;
+        return {
+          Result: 'OK',
+          Records: [{
+            Cuit: cleanCuit,
+            RazonSocial: 'PRODUCTOR APICOLA SIMULADO ' + cleanCuit.slice(-4),
+            NumeroRenapa: 'A' + randomNum,
+            Provincia: 'BUENOS AIRES',
+            Partido: 'BALCARCE',
+            Localidad: 'BALCARCE',
+            FechaAprobacion: '12/05/2024',
+            FechaVencimiento: '12/05/2026',
+            Estado: 'Vigente',
+            IdSolicitud: 12345,
+            Constancia: true
+          }]
+        };
+      } else {
+        return {
+          Result: 'OK',
+          Records: []
+        };
+      }
+    }
+
+    const { data, error } = await supabase!.rpc('consultar_renapa', { p_cuit: cuit });
     if (error) throw error;
     return data;
   },
