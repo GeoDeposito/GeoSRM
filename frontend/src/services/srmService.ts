@@ -200,8 +200,9 @@ const initializeLocalStorageMock = () => {
 
   const storedApics = localStorage.getItem('srm_apicultores');
   const hasRuiz = storedApics && storedApics.includes('e37fb194-9e25-5d90-b912-9925001072c0');
+  const hasDuplicateRuiz = storedApics && (storedApics.includes('20-16194725-9') || storedApics.includes('Ruiz Ruben Oscar (G. Pico)'));
 
-  if (!localStorage.getItem('srm_apicultores') || !hasRuiz) {
+  if (!localStorage.getItem('srm_apicultores') || !hasRuiz || hasDuplicateRuiz) {
     localStorage.setItem('srm_apicultores', JSON.stringify(combinedApicultores));
     localStorage.setItem('srm_entregas', JSON.stringify(combinedEntregas));
     localStorage.setItem('srm_tambores', JSON.stringify(combinedTambores));
