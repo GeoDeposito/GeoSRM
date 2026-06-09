@@ -62,6 +62,7 @@ function App() {
   const [showAddEnvase, setShowAddEnvase] = useState(false);
   const [showAddCC, setShowAddCC] = useState(false);
   const [showAddOperculo, setShowAddOperculo] = useState(false);
+  const [showPowerAutomateGuide, setShowPowerAutomateGuide] = useState(false);
   
   // Estados de formularios
   const [newApicultorForm, setNewApicultorForm] = useState({
@@ -1435,10 +1436,34 @@ function App() {
                     </div>
 
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                      <strong style={{ color: 'var(--text-title)' }}>Arquitectura del Enlace:</strong>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.25rem' }}>
-                        <div><strong>Opción 1:</strong> Webhook de Power Automate en SharePoint directo a Supabase.</div>
-                        <div><strong>Opción 2:</strong> Script programado de sincronización vía Graph API.</div>
+                      <strong style={{ color: 'var(--text-title)' }}>Arquitectura de Enlace:</strong>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.25rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <span className="material-symbols-outlined" style={{ fontSize: '0.9rem', color: 'var(--success)' }}>check_circle</span>
+                          <span>Power Automate + Supabase Webhook</span>
+                        </div>
+                        <button 
+                          onClick={() => setShowPowerAutomateGuide(true)}
+                          style={{
+                            alignSelf: 'flex-start',
+                            padding: '0.25rem 0.5rem',
+                            backgroundColor: 'transparent',
+                            color: 'var(--primary)',
+                            border: '1px solid var(--primary)',
+                            borderRadius: '6px',
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                            marginTop: '0.2rem'
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '0.8rem' }}>settings</span>
+                          Ver Configuración del Webhook
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -4041,6 +4066,182 @@ function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Guía de Power Automate */}
+      {showPowerAutomateGuide && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 999, padding: '1rem'
+        }}>
+          <div className="card-premium" style={{ width: '100%', maxWidth: '750px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+              <h3 className="font-title" style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-title)', display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
+                <span className="material-symbols-outlined" style={{ color: 'var(--primary)', fontSize: '1.4rem' }}>settings_ethernet</span>
+                Configuración de Webhook (Power Automate & SharePoint)
+              </h3>
+              <button 
+                onClick={() => setShowPowerAutomateGuide(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--text-secondary)' }}
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-body)', lineHeight: 1.5, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <p>
+                Como las filas de tambores con miel (TCM) se agregan a su archivo de Excel mediante Power Automate, puede conectar ese mismo flujo directamente a Supabase. De esta forma, el <strong>APICULTOR SRM</strong> se actualizará en tiempo real sin requerir acciones manuales.
+              </p>
+
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}>
+                <div style={{ backgroundColor: 'rgba(8,32,26,0.03)', padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--border-color)', fontWeight: 700, color: 'var(--primary)', fontSize: '0.75rem' }}>
+                  CONFIGURACIÓN DE LA ACCIÓN HTTP EN POWER AUTOMATE
+                </div>
+                <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div>
+                    <strong style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Método HTTP</strong>
+                    <span style={{ fontFamily: 'monospace', backgroundColor: '#E8F5E9', color: '#2E7D32', padding: '0.15rem 0.4rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>POST</span>
+                  </div>
+                  <div>
+                    <strong style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>URI del Webhook</strong>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.2rem' }}>
+                      <input 
+                        type="text" 
+                        readOnly 
+                        value="https://ajrfkkiuludrdexgprmb.supabase.co/rest/v1/rpc/registrar_tcm_desde_sharepoint" 
+                        style={{ flex: 1, padding: '0.4rem', fontFamily: 'monospace', fontSize: '0.7rem', border: '1px solid var(--border-color)', borderRadius: '4px', backgroundColor: '#F9F9F9', color: 'var(--text-body)' }}
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText("https://ajrfkkiuludrdexgprmb.supabase.co/rest/v1/rpc/registrar_tcm_desde_sharepoint");
+                          alert("¡URL copiada al portapapeles!");
+                        }}
+                        style={{ padding: '0.4rem 0.75rem', backgroundColor: 'var(--primary)', color: '#FFFFFF', border: 'none', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        Copiar
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <strong style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Cabeceras (Headers)</strong>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontFamily: 'monospace', fontSize: '0.7rem', backgroundColor: '#F5F5F5', padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', color: 'var(--text-body)' }}>
+                      <div><strong>Content-Type:</strong> application/json</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span><strong>apikey:</strong> sb_publishable_bYlB4bsuJyv7nMOUXrs...</span>
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText("sb_publishable_bYlB4bsuJyv7nMOUXrsRew_ubUacX2Q");
+                            alert("¡API Key copiada!");
+                          }}
+                          style={{ padding: '0.1rem 0.3rem', fontSize: '0.6rem', backgroundColor: '#E0E0E0', border: 'none', borderRadius: '3px', cursor: 'pointer', fontWeight: 600 }}
+                        >Copiar Completa</button>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span><strong>Authorization:</strong> Bearer sb_publishable_bYlB4bsuJyv7nMOUXrs...</span>
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText("Bearer sb_publishable_bYlB4bsuJyv7nMOUXrsRew_ubUacX2Q");
+                            alert("¡Header Authorization copiado!");
+                          }}
+                          style={{ padding: '0.1rem 0.3rem', fontSize: '0.6rem', backgroundColor: '#E0E0E0', border: 'none', borderRadius: '3px', cursor: 'pointer', fontWeight: 600 }}
+                        >Copiar Completo</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}>
+                <div style={{ backgroundColor: 'rgba(8,32,26,0.03)', padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--border-color)', fontWeight: 700, color: 'var(--primary)', fontSize: '0.75rem' }}>
+                  CUERPO (JSON BODY) DE LA ACCIÓN EN POWER AUTOMATE
+                </div>
+                <div style={{ padding: '0.75rem' }}>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                    Pegue este JSON en el campo "Cuerpo" de su acción HTTP, asociando cada parámetro con las columnas dinámicas de su Excel:
+                  </p>
+                  <pre style={{
+                    backgroundColor: '#1E1E1E',
+                    color: '#D4D4D4',
+                    padding: '0.75rem',
+                    borderRadius: '6px',
+                    fontFamily: 'monospace',
+                    fontSize: '0.7rem',
+                    overflowX: 'auto',
+                    margin: 0,
+                    lineHeight: 1.4
+                  }}>
+{`{
+  "p_cuit": "@{items('Aplicar_a_cada_fila')?['CUIT']}",
+  "p_apicultor_nombre": "@{items('Aplicar_a_cada_fila')?['Apicultor']}",
+  "p_fecha": "@{items('Aplicar_a_cada_fila')?['Fecha_Deposito']}",
+  "p_nro_tambor": "@{items('Aplicar_a_cada_fila')?['ID_Tambor']}",
+  "p_barras_ean": "@{items('Aplicar_a_cada_fila')?['Codigo_SENASA']}",
+  "p_lote": @{coalesce(items('Aplicar_a_cada_fila')?['Lote'], 0)},
+  "p_kilos_bruto": @{items('Aplicar_a_cada_fila')?['Peso_Bruto']},
+  "p_tara": @{items('Aplicar_a_cada_fila')?['Tara']},
+  "p_color_pfund": @{coalesce(items('Aplicar_a_cada_fila')?['Color'], 0)},
+  "p_humedad": @{coalesce(items('Aplicar_a_cada_fila')?['Humedad'], 0)},
+  "p_hmf": @{coalesce(items('Aplicar_a_cada_fila')?['HMF'], 0)},
+  "p_antibiotico": "NEGATIVO"
+}`}
+                  </pre>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        const bodyTemplate = `{
+  "p_cuit": "@{items('Aplicar_a_cada_fila')?['CUIT']}",
+  "p_apicultor_nombre": "@{items('Aplicar_a_cada_fila')?['Apicultor']}",
+  "p_fecha": "@{items('Aplicar_a_cada_fila')?['Fecha_Deposito']}",
+  "p_nro_tambor": "@{items('Aplicar_a_cada_fila')?['ID_Tambor']}",
+  "p_barras_ean": "@{items('Aplicar_a_cada_fila')?['Codigo_SENASA']}",
+  "p_lote": 14002,
+  "p_kilos_bruto": 300,
+  "p_tara": 16,
+  "p_color_pfund": 34,
+  "p_humedad": 17.2,
+  "p_hmf": 12.5,
+  "p_antibiotico": "NEGATIVO"
+}`;
+                        navigator.clipboard.writeText(bodyTemplate);
+                        alert("¡Cuerpo JSON copiado al portapapeles!");
+                      }}
+                      style={{ padding: '0.3rem 0.6rem', backgroundColor: '#F0F0F0', border: '1px solid #CCC', borderRadius: '4px', fontSize: '0.7rem', cursor: 'pointer', fontWeight: 700, color: 'var(--text-body)' }}
+                    >
+                      Copiar Cuerpo JSON
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ backgroundColor: 'rgba(255,193,7,0.08)', border: '1px solid #FFE082', borderRadius: '8px', padding: '0.75rem', fontSize: '0.75rem', color: '#B78103' }}>
+                <strong style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>warning</span>
+                  Beneficios del Webhook Inteligente en la Base de Datos:
+                </strong>
+                <ul style={{ margin: '0.25rem 0 0 1.25rem', padding: 0, display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                  <li><strong>Auto-asociación:</strong> El webhook busca al apicultor por CUIT. Si no está registrado en el SRM, crea automáticamente un registro temporal (etapa Prospecto) para no perder los datos.</li>
+                  <li><strong>Agrupación por Día:</strong> Agrupa automáticamente múltiples tambores del mismo apicultor entregados en una misma fecha en una única "Ficha de Entrega de Miel" (calculando promedios ponderados de humedad, color y HMF).</li>
+                  <li><strong>Control de Duplicados:</strong> Si por error de flujo Power Automate vuelve a enviar un tambor existente, el SRM actualiza sus datos en lugar de duplicar el tambor.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', marginTop: '0.5rem' }}>
+              <button 
+                type="button"
+                onClick={() => setShowPowerAutomateGuide(false)} 
+                style={{ padding: '0.5rem 1.25rem', backgroundColor: 'var(--primary)', color: '#FFFFFF', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: 700, cursor: 'pointer' }}
+              >
+                Cerrar Guía
+              </button>
+            </div>
           </div>
         </div>
       )}
