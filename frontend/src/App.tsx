@@ -13,9 +13,8 @@ import {
   Menu,
   Truck,
   DollarSign,
-  TrendingUp,
   ChevronRight,
-  Trello
+  Kanban
 } from 'lucide-react';
 import { srmService } from './services/srmService';
 import { isMockMode } from './services/supabaseClient';
@@ -925,7 +924,7 @@ function App() {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <Trello size={18} />
+                <Kanban size={18} />
                 <span>Embudo de Proveedores</span>
               </div>
             </button>
@@ -1411,7 +1410,7 @@ function App() {
               {/* Resumen del Embudo de Incorporación */}
               <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-                  <Trello size={18} style={{ color: 'var(--secondary)' }} />
+                  <Kanban size={18} style={{ color: 'var(--secondary)' }} />
                   <h4 className="font-title" style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-title)' }}>Embudo de Incorporación</h4>
                 </div>
                 
