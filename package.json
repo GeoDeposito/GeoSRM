@@ -1,0 +1,8 @@
+{
+  "name": "apicultor-srm-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build && cd .. && cp -r frontend/dist ./dist"
+  }
+}
