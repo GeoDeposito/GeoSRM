@@ -3693,15 +3693,15 @@ export const RUIZ_MOCK_OPERCULO = [
 
 export const RUIZ_PROFILE = {
   "id": "e37fb194-9e25-5d90-b912-9925001072c0",
-  "nombre": "Ruiz Ruben Oscar (G. Pico)",
-  "cuit": "20-16194725-9",
-  "localidad": "General Pico",
-  "cod_api": "9191",
+  "nombre": "Ruiz, Ruben Oscar",
+  "cuit": "20-17672615-7",
+  "localidad": "General pico",
+  "cod_api": "428",
   "provincia": "La Pampa",
-  "dni": "16194725",
-  "renapa": "L-4291",
-  "telefono": "02302-156389",
-  "puntuacion": 4.9,
+  "dni": "17672615",
+  "renapa": "L3461",
+  "telefono": "5492302640499",
+  "puntuacion": 5.0,
   "created_at": "2019-01-03T00:00:00Z",
   "updated_at": "2023-04-14T00:00:00Z"
 };

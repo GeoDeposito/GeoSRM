@@ -60,7 +60,7 @@ RUIZ_PROFILE_ID = "e37fb194-9e25-5d90-b912-9925001072c0"
 ruiz_profile_sql = f"""
 -- 3. INSERTAR PERFIL DE RUIZ RUBEN OSCAR
 INSERT INTO public.apicultores (id, nombre, cuit, localidad, cod_api, provincia, dni, renapa, telefono, puntuacion) VALUES
-('{RUIZ_PROFILE_ID}', 'Ruiz Ruben Oscar (G. Pico)', '20-16194725-9', 'General Pico', '9191', 'La Pampa', '16194725', 'L-4291', '02302-156389', 4.9)
+('{RUIZ_PROFILE_ID}', 'Ruiz, Ruben Oscar', '20-17672615-7', 'General pico', '428', 'La Pampa', '17672615', 'L3461', '5492302640499', 5.0)
 ON CONFLICT (id) DO UPDATE SET
     nombre = EXCLUDED.nombre,
     cuit = EXCLUDED.cuit,

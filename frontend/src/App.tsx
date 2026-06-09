@@ -45,6 +45,12 @@ function App() {
   
   // Estados de filtros
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+  
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filtroAlerta]);
   
   // Estados para diálogos (Modales)
   const [showAddApicultor, setShowAddApicultor] = useState(false);
@@ -83,6 +89,92 @@ function App() {
     detalle: '',
     fecha: ''
   });
+
+  // Estados para cálculos reactivos en Cuenta Corriente (Formularios Avanzados)
+  const [insumoCodigo, setInsumoCodigo] = useState<number | 'manual'>('manual');
+  const [insumoCantidad, setInsumoCantidad] = useState<number>(1);
+  const [insumoPrecioUnitario, setInsumoPrecioUnitario] = useState<number>(0);
+  const [envaseTipo, setEnvaseTipo] = useState<'TNA' | 'TR'>('TNA');
+  const [envaseCantidad, setEnvaseCantidad] = useState<number>(1);
+  const [envasePrecioUnitarioUsd, setEnvasePrecioUnitarioUsd] = useState<number>(34.0);
+  const [precioMielUsd, setPrecioMielUsd] = useState<number>(1.0);
+  const [ventaKilos, setVentaKilos] = useState<number>(1000);
+  const [ventaPrecioRef, setVentaPrecioRef] = useState<number>(1700);
+
+  // Efecto para auto-calcular montos, miel equivalente y detalles de Cuenta Corriente reactivamente
+  useEffect(() => {
+    if (!showAddCC) return;
+    
+    const tipoTx = newCCForm.tipo_transaccion;
+    if (tipoTx === 'ANTICIPO_CASH') {
+      const precioRef = newCCForm.precio_referencia_miel;
+      const calcKilos = precioRef > 0 ? -(newCCForm.monto / precioRef) : 0;
+      setNewCCForm(prev => ({
+        ...prev,
+        tipo: 'DEBE',
+        kilos_miel_equiv: Number(calcKilos.toFixed(2)),
+        detalle: prev.detalle || `Anticipo de Fondos (${prev.moneda})`
+      }));
+    } else if (tipoTx === 'RETIRO_INSUMO') {
+      const totalMonto = insumoCantidad * insumoPrecioUnitario;
+      const precioRef = newCCForm.precio_referencia_miel || 1700;
+      const calcKilos = precioRef > 0 ? -(totalMonto / precioRef) : 0;
+      let prodDesc = 'Insumos Varios';
+      if (insumoCodigo !== 'manual') {
+        const prod = productos.find(p => p.codigo === insumoCodigo);
+        if (prod) prodDesc = prod.descripcion;
+      }
+      setNewCCForm(prev => ({
+        ...prev,
+        moneda: 'ARS',
+        tipo: 'DEBE',
+        monto: totalMonto,
+        precio_referencia_miel: precioRef,
+        kilos_miel_equiv: Number(calcKilos.toFixed(2)),
+        detalle: `Retiro de ${insumoCantidad} ${prodDesc} (Unitario: $${insumoPrecioUnitario})`
+      }));
+    } else if (tipoTx === 'CARGO_ENVASE') {
+      const totalMonto = envaseCantidad * envasePrecioUnitarioUsd;
+      const calcKilos = precioMielUsd > 0 ? -(totalMonto / precioMielUsd) : 0;
+      const descEnvase = envaseTipo === 'TNA' ? 'Tambor Nuevo Apto (TNA)' : 'Tambor Retornable (TR/TRR)';
+      setNewCCForm(prev => ({
+        ...prev,
+        moneda: 'USD',
+        tipo: 'DEBE',
+        monto: totalMonto,
+        precio_referencia_miel: precioMielUsd,
+        kilos_miel_equiv: Number(calcKilos.toFixed(2)),
+        detalle: `Cargo de ${envaseCantidad} envases ${descEnvase} (Unitario: ${envasePrecioUnitarioUsd} USD)`
+      }));
+    } else if (tipoTx === 'VENTA_LIQUIDACION') {
+      const totalMonto = ventaKilos * ventaPrecioRef;
+      setNewCCForm(prev => ({
+        ...prev,
+        moneda: 'ARS',
+        tipo: 'HABER',
+        monto: totalMonto,
+        precio_referencia_miel: ventaPrecioRef,
+        kilos_miel_equiv: -Math.abs(ventaKilos), // Liquida reduce physical balance
+        detalle: `Liquidación de ${ventaKilos.toLocaleString('es-AR')} kg de miel a $${ventaPrecioRef}/kg`
+      }));
+    }
+  }, [
+    newCCForm.tipo_transaccion,
+    newCCForm.monto,
+    newCCForm.precio_referencia_miel,
+    newCCForm.moneda,
+    insumoCodigo,
+    insumoCantidad,
+    insumoPrecioUnitario,
+    envaseTipo,
+    envaseCantidad,
+    envasePrecioUnitarioUsd,
+    precioMielUsd,
+    ventaKilos,
+    ventaPrecioRef,
+    showAddCC
+  ]);
+
 
   // Cargar lista de apicultores al montar
   useEffect(() => {
@@ -234,7 +326,7 @@ function App() {
       let finalKilosOp = newOperculoForm.kilos_op;
       if (newOperculoForm.tipo === 'RETIRO_CERA') {
         // Cappings equivalent is negative for withdrawals (e.g. -70/0.8)
-        finalKilosOp = -Math.abs(newOperculoForm.kilos_op);
+        finalKilosOp = -Math.abs(newOperculoForm.kilos_op / newOperculoForm.rendimiento_cera);
       }
 
       await srmService.createOperculoMovimiento(
@@ -296,6 +388,13 @@ function App() {
     return true;
   });
 
+  const avgRating = apicultores.length > 0
+    ? (apicultores.reduce((acc, curr) => acc + curr.puntuacion, 0) / apicultores.length).toFixed(2)
+    : '5.00';
+  const totalLocalidades = new Set(apicultores.map(a => a.localidad).filter(Boolean)).size;
+  const totalPages = Math.ceil(apicultoresFiltrados.length / itemsPerPage);
+  const apicultoresPaginados = apicultoresFiltrados.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
 
   return (
     <div className="app-container">
@@ -310,18 +409,16 @@ function App() {
           ------------------------------------------------------------------- */}
       <aside className={`sidebar-premium ${mobileMenuOpen ? 'open' : ''}`}>
         <div>
-          {/* Logo y Encabezado de Geomiel */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '2rem', padding: '0.25rem 0.5rem' }}>
+          {/* Logo y Encabezado de GEO-SRM */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '2.5rem', padding: '0.25rem 0.5rem' }}>
+            <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--primary)', letterSpacing: '0.05em', fontFamily: 'var(--font-title)' }}>
+              GEO-SRM
+            </div>
             <img 
               src="/logo-geomiel.png" 
               alt="GeoMiel Logo" 
-              style={{ height: '52px', width: 'auto', objectFit: 'contain', alignSelf: 'flex-start' }} 
+              style={{ height: '42px', width: 'auto', objectFit: 'contain', alignSelf: 'flex-start', marginTop: '-0.2rem' }} 
             />
-            <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem', marginTop: '0.25rem' }}>
-              <span className="label-caps" style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontWeight: 700, letterSpacing: '0.12em' }}>
-                ADMIN EXECUTIVE SUITE
-              </span>
-            </div>
           </div>
 
           {/* Menú de Navegación */}
@@ -359,12 +456,12 @@ function App() {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 padding: '0.75rem 1rem',
-                borderRadius: (view === 'directorio' && !filtroAlerta) ? '0 var(--radius-sm) var(--radius-sm) 0' : 'var(--radius-sm)',
+                borderRadius: view === 'directorio' ? '0 var(--radius-sm) var(--radius-sm) 0' : 'var(--radius-sm)',
                 fontWeight: 600,
                 fontSize: '0.9rem',
-                backgroundColor: (view === 'directorio' && !filtroAlerta) ? 'var(--bg-sidebar-active)' : 'transparent',
-                color: (view === 'directorio' && !filtroAlerta) ? 'var(--primary)' : 'var(--text-body)',
-                borderLeft: (view === 'directorio' && !filtroAlerta) ? '4px solid var(--primary)' : 'none',
+                backgroundColor: view === 'directorio' ? 'var(--bg-sidebar-active)' : 'transparent',
+                color: view === 'directorio' ? 'var(--primary)' : 'var(--text-body)',
+                borderLeft: view === 'directorio' ? '4px solid var(--primary)' : 'none',
                 transition: 'all 0.15s ease'
               }}
             >
@@ -387,7 +484,7 @@ function App() {
             </button>
 
             <button 
-              onClick={() => { setView('directorio'); setApicultorSeleccionado(null); setFiltroAlerta(true); setMobileMenuOpen(false); }}
+              onClick={() => { setView('alertas'); setApicultorSeleccionado(null); setFiltroAlerta(false); setMobileMenuOpen(false); }}
               className="font-title"
               style={{
                 width: '100%',
@@ -395,12 +492,12 @@ function App() {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 padding: '0.75rem 1rem',
-                borderRadius: (view === 'directorio' && filtroAlerta) ? '0 var(--radius-sm) var(--radius-sm) 0' : 'var(--radius-sm)',
+                borderRadius: view === 'alertas' ? '0 var(--radius-sm) var(--radius-sm) 0' : 'var(--radius-sm)',
                 fontWeight: 600,
                 fontSize: '0.9rem',
-                backgroundColor: (view === 'directorio' && filtroAlerta) ? 'var(--bg-sidebar-active)' : 'transparent',
-                color: (view === 'directorio' && filtroAlerta) ? 'var(--primary)' : 'var(--text-body)',
-                borderLeft: (view === 'directorio' && filtroAlerta) ? '4px solid var(--primary)' : 'none',
+                backgroundColor: view === 'alertas' ? 'var(--bg-sidebar-active)' : 'transparent',
+                color: view === 'alertas' ? 'var(--primary)' : 'var(--text-body)',
+                borderLeft: view === 'alertas' ? '4px solid var(--primary)' : 'none',
                 transition: 'all 0.15s ease'
               }}
             >
@@ -994,8 +1091,8 @@ function App() {
                 </div>
                 <div>
                   <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Total Apicultores</span>
-                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>1,284</span>
-                  <span style={{ fontSize: '0.75rem', color: '#137333', fontWeight: 700 }}>↗ +12% vs mes anterior</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>{apicultores.length}</span>
+                  <span style={{ fontSize: '0.75rem', color: '#137333', fontWeight: 700 }}>Activos en base de datos</span>
                 </div>
               </div>
 
@@ -1005,12 +1102,12 @@ function App() {
                   backgroundColor: 'rgba(19, 115, 51, 0.08)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#137333'
                 }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>verified_user</span>
+                  <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>location_on</span>
                 </div>
                 <div>
-                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Tasa de Verificación</span>
-                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>98.2%</span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>1,261 apicultores validados</span>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Localidades</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>{totalLocalidades}</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Zonas de acopio representadas</span>
                 </div>
               </div>
 
@@ -1023,9 +1120,9 @@ function App() {
                   <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>star</span>
                 </div>
                 <div>
-                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Rating Global</span>
-                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>4.85</span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Basado en 500 entregas</span>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Rating Promedio</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>{avgRating}</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Desempeño general de red</span>
                 </div>
               </div>
 
@@ -1038,9 +1135,9 @@ function App() {
                   <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>hive</span>
                 </div>
                 <div>
-                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Apiarios Activos</span>
-                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>4,512</span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>En producción actual</span>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Miel Acopiada</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>{(globalStats.totalKilosMiel / 1000).toFixed(1)} Ton</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Kilos netos totales</span>
                 </div>
               </div>
             </div>
@@ -1154,7 +1251,7 @@ function App() {
                         </td>
                       </tr>
                     ) : (
-                      apicultoresFiltrados.map((a) => {
+                      apicultoresPaginados.map((a) => {
                         const tieneIncidencia = globalStats.incidencias.some(inc => inc.apicultor_nombre === a.nombre);
                         const apiariosCount = Math.floor((a.nombre.length * 7) % 15) + 3; // Mock apiarios count
                         
@@ -1222,8 +1319,178 @@ function App() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Controles de Paginación */}
+              {totalPages > 1 && (
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginTop: '1.5rem',
+                  padding: '0 0.5rem',
+                  flexWrap: 'wrap',
+                  gap: '0.75rem'
+                }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    Mostrando apicultores <strong>{(currentPage - 1) * itemsPerPage + 1}</strong> - <strong>{Math.min(currentPage * itemsPerPage, apicultoresFiltrados.length)}</strong> de <strong>{apicultoresFiltrados.length}</strong> (Página {currentPage} de {totalPages})
+                  </span>
+                  <div style={{ display: 'flex', gap: '0.375rem' }}>
+                    <button
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                      style={{
+                        padding: '0.4rem 0.75rem',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: '#FFFFFF',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                        opacity: currentPage === 1 ? 0.5 : 1
+                      }}
+                    >
+                      Anterior
+                    </button>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                      .map((p, idx, arr) => {
+                        const showEllipsis = idx > 0 && p - arr[idx - 1] > 1;
+                        return (
+                          <div key={p} style={{ display: 'flex', gap: '0.375rem' }}>
+                            {showEllipsis && <span style={{ padding: '0.4rem 0.25rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>...</span>}
+                            <button
+                              onClick={() => setCurrentPage(p)}
+                              style={{
+                                padding: '0.4rem 0.75rem',
+                                borderRadius: '6px',
+                                border: p === currentPage ? '1px solid var(--secondary)' : '1px solid var(--border-color)',
+                                backgroundColor: p === currentPage ? 'var(--secondary)' : '#FFFFFF',
+                                color: p === currentPage ? '#FFFFFF' : 'var(--text-body)',
+                                fontSize: '0.8rem',
+                                fontWeight: 700,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {p}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    <button
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                      style={{
+                        padding: '0.4rem 0.75rem',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: '#FFFFFF',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                        opacity: currentPage === totalPages ? 0.5 : 1
+                      }}
+                    >
+                      Siguiente
+                    </button>
+                  </div>
+                </div>
+              )}
             </section>
           </>
+        )}
+
+        {/* -------------------------------------------------------------------
+            VISTA DE ALERTAS DE INCUMPLIMIENTOS / CALIDAD (DEDICADA)
+            ------------------------------------------------------------------- */}
+        {view === 'alertas' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <section className="card-premium">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                <h3 className="font-title" style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)' }}>
+                  Panel de Control de Calidad e Incumplimientos
+                </h3>
+                <span className="badge badge-danger">{globalStats.incidencias.length} Alertas Activas</span>
+              </div>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
+                Registro de lotes de miel que exceden los parámetros estándar establecidos por Geomiel para la exportación. Los límites tolerados son de <strong>Humedad &lt; 18.0%</strong> y <strong>HMF &lt; 40.0 mg/kg</strong>.
+              </p>
+
+              <div className="table-container">
+                <table className="table-premium">
+                  <thead>
+                    <tr>
+                      <th className="font-title">Fecha</th>
+                      <th className="font-title">Apicultor</th>
+                      <th className="font-title text-center">Humedad (%)</th>
+                      <th className="font-title text-center">HMF (mg/kg)</th>
+                      <th className="font-title text-center">Tambores</th>
+                      <th className="font-title text-right">Kilos Neto</th>
+                      <th className="font-title text-right">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {globalStats.incidencias.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', color: '#065F46', padding: '3rem', backgroundColor: '#ECFDF5' }}>
+                          <span className="material-symbols-outlined" style={{ fontSize: '36px', color: '#059669', marginBottom: '0.5rem', display: 'block' }}>check_circle</span>
+                          <strong>Excelente - Todo en Orden</strong>
+                          <p style={{ marginTop: '0.25rem', color: '#047857', fontSize: '0.85rem' }}>
+                            No se registran alertas de calidad de miel en el sistema. Todos los lotes cumplen con los estándares.
+                          </p>
+                        </td>
+                      </tr>
+                    ) : (
+                      globalStats.incidencias.map((inc) => {
+                        const apicultorObj = apicultores.find(a => a.nombre === inc.apicultor_nombre);
+                        return (
+                          <tr key={inc.id} className="table-row-hover">
+                            <td className="font-mono">{new Date(inc.fecha).toLocaleDateString('es-AR')}</td>
+                            <td>
+                              <strong style={{ color: 'var(--text-title)' }}>{inc.apicultor_nombre}</strong>
+                            </td>
+                            <td className="font-mono text-center" style={{ 
+                              fontWeight: 700,
+                              color: inc.humedad > 18.0 ? 'var(--danger)' : 'var(--text-title)',
+                              backgroundColor: inc.humedad > 18.0 ? 'var(--danger-light)' : 'transparent'
+                            }}>
+                              {inc.humedad.toFixed(1)}% {inc.humedad > 18.0 && '⚠️'}
+                            </td>
+                            <td className="font-mono text-center" style={{ 
+                              fontWeight: 700,
+                              color: inc.hmf > 40.0 ? 'var(--danger)' : 'var(--text-title)',
+                              backgroundColor: inc.hmf > 40.0 ? 'var(--danger-light)' : 'transparent'
+                            }}>
+                              {inc.hmf.toFixed(1)} {inc.hmf > 40.0 && '⚠️'}
+                            </td>
+                            <td className="font-mono text-center">{inc.cantidad_tambores}</td>
+                            <td className="font-mono text-right">{inc.kilos_neto.toLocaleString('es-AR')} kg</td>
+                            <td style={{ textAlign: 'right' }}>
+                              <button 
+                                onClick={() => {
+                                  if (apicultorObj) seleccionarApicultor(apicultorObj.id);
+                                }}
+                                className="font-title"
+                                style={{
+                                  padding: '0.4rem 1rem',
+                                  borderRadius: '6px',
+                                  backgroundColor: 'var(--secondary)',
+                                  color: '#FFFFFF',
+                                  fontWeight: 700,
+                                  fontSize: '0.75rem',
+                                }}
+                              >
+                                VER FICHA
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
         )}
 
         {/* -------------------------------------------------------------------
@@ -2052,121 +2319,328 @@ function App() {
           backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
           zIndex: 999, padding: '1rem'
         }}>
-          <div className="card-premium" style={{ width: '100%', maxWidth: '550px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 800 }}>Registrar Transacción en Cuenta Corriente</h3>
+          <div className="card-premium" style={{ width: '100%', maxWidth: '550px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1.25rem', padding: '1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)' }}>Registrar Transacción en Cuenta Corriente</h3>
+              <button 
+                type="button" 
+                onClick={() => setShowAddCC(false)}
+                style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer', color: 'var(--text-secondary)' }}
+              >
+                ✕
+              </button>
+            </div>
             
-            <form onSubmit={handleCreateCC} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+            <form onSubmit={handleCreateCC} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '0.75rem' }}>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Tipo de Operación</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)' }}>Tipo de Operación Comercial</label>
                   <select 
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
+                    style={{ width: '100%', padding: '0.625rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF', fontWeight: 600 }}
                     value={newCCForm.tipo_transaccion}
                     onChange={e => {
                       const val = e.target.value as any;
                       let matchedTipo: 'DEBE' | 'HABER' = 'DEBE';
+                      let matchedMoneda: 'ARS' | 'USD' = 'ARS';
+                      let matchedPrecioRef = 1700;
+                      
                       if (val === 'VENTA_LIQUIDACION') matchedTipo = 'HABER';
-                      setNewCCForm({ ...newCCForm, tipo_transaccion: val, tipo: matchedTipo });
+                      if (val === 'CARGO_ENVASE') {
+                        matchedMoneda = 'USD';
+                        matchedPrecioRef = 1.0;
+                      }
+                      
+                      setNewCCForm({ 
+                        ...newCCForm, 
+                        tipo_transaccion: val, 
+                        tipo: matchedTipo,
+                        moneda: matchedMoneda,
+                        precio_referencia_miel: matchedPrecioRef,
+                        monto: val === 'RETIRO_INSUMO' ? 0 : 100000
+                      });
+                      
+                      // Resetear auxiliares
+                      setInsumoCodigo('manual');
+                      setInsumoCantidad(1);
+                      setInsumoPrecioUnitario(0);
+                      setEnvaseTipo('TNA');
+                      setEnvaseCantidad(1);
+                      setEnvasePrecioUnitarioUsd(34.0);
+                      setPrecioMielUsd(1.0);
+                      setVentaKilos(1000);
+                      setVentaPrecioRef(1700);
                     }}
                   >
-                    <option value="ANTICIPO_CASH">Anticipo Efectivo / Transferencia</option>
-                    <option value="RETIRO_INSUMO">Retiro de Insumo (Materiales)</option>
-                    <option value="CARGO_ENVASE">Cargo / Alquiler de Tambor</option>
-                    <option value="VENTA_LIQUIDACION">Venta / Liquidación de Miel (Fijar Precio)</option>
-                    <option value="SALDO_INICIAL">Saldo Inicial</option>
-                    <option value="AJUSTE">Ajuste de Cuenta</option>
+                    <option value="ANTICIPO_CASH">💵 Anticipo de Efectivo / Transferencia</option>
+                    <option value="RETIRO_INSUMO">📦 Retiro de Insumos (Cera, Alzas, etc.)</option>
+                    <option value="CARGO_ENVASE">🛢️ Cargo / Venta de Envases vacíos</option>
+                    <option value="VENTA_LIQUIDACION">🍯 Fijación de Precio / Liquidación de Miel</option>
+                    <option value="SALDO_INICIAL">⚖️ Saldo Inicial</option>
+                    <option value="AJUSTE">⚙️ Ajuste Técnico de Cuenta</option>
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Fecha Operación</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)' }}>Fecha</label>
                   <input 
                     type="date"
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    required
+                    style={{ width: '100%', padding: '0.625rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
                     value={newCCForm.fecha}
                     onChange={e => setNewCCForm({ ...newCCForm, fecha: e.target.value })}
                   />
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Moneda</label>
-                  <select 
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
-                    value={newCCForm.moneda}
-                    onChange={e => setNewCCForm({ ...newCCForm, moneda: e.target.value as any })}
-                  >
-                    <option value="ARS">Pesos (ARS)</option>
-                    <option value="USD">Dólares (USD)</option>
-                  </select>
+              {/* ----------------- SUB-FORMULARIO DINÁMICO ----------------- */}
+              
+              {newCCForm.tipo_transaccion === 'ANTICIPO_CASH' && (
+                <div className="card-premium" style={{ backgroundColor: '#FAFBFD', padding: '1rem', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--secondary)', textTransform: 'uppercase' }}>Configuración de Anticipo</span>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Moneda de Pago</label>
+                      <select 
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
+                        value={newCCForm.moneda}
+                        onChange={e => {
+                          const m = e.target.value as any;
+                          const pRef = m === 'USD' ? 1.0 : 1700;
+                          setNewCCForm({ ...newCCForm, moneda: m, precio_referencia_miel: pRef });
+                        }}
+                      >
+                        <option value="ARS">Pesos ($ ARS)</option>
+                        <option value="USD">Dólares (US$ USD)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Monto Adelantado</label>
+                      <input 
+                        type="number" required min="1" step="any"
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                        value={newCCForm.monto}
+                        onChange={e => setNewCCForm({ ...newCCForm, monto: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Precio de Referencia Miel Pactado</label>
+                    <input 
+                      type="number" required min="0.1" step="any"
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                      value={newCCForm.precio_referencia_miel}
+                      onChange={e => setNewCCForm({ ...newCCForm, precio_referencia_miel: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Dirección (Imputación)</label>
-                  <select 
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
-                    value={newCCForm.tipo}
-                    onChange={e => setNewCCForm({ ...newCCForm, tipo: e.target.value as any })}
-                  >
-                    <option value="DEBE">DEBE (Apicultor retira dinero/insumos - Débito)</option>
-                    <option value="HABER">HABER (Liquidación o cobro - Crédito)</option>
-                  </select>
-                </div>
-              </div>
+              )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+              {newCCForm.tipo_transaccion === 'RETIRO_INSUMO' && (
+                <div className="card-premium" style={{ backgroundColor: '#FAFBFD', padding: '1rem', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--secondary)', textTransform: 'uppercase' }}>Detalle de Insumos Retirados</span>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Seleccionar Producto del Catálogo</label>
+                    <select 
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
+                      value={insumoCodigo}
+                      onChange={e => {
+                        const val = e.target.value;
+                        if (val === 'manual') {
+                          setInsumoCodigo('manual');
+                          setInsumoPrecioUnitario(0);
+                        } else {
+                          const cod = parseInt(val);
+                          setInsumoCodigo(cod);
+                          // Intentar pre-cargar un precio sugerido de insumo en base al código de Ruiz o catálogo
+                          let precioSugerido = 0;
+                          if (cod === 10) precioSugerido = 2200; // Cera Estampada
+                          else if (cod === 13) precioSugerido = 2000; // Techo
+                          else if (cod === 14) precioSugerido = 1800; // Piso
+                          else precioSugerido = 2500;
+                          setInsumoPrecioUnitario(precioSugerido);
+                        }
+                      }}
+                    >
+                      <option value="manual">✍️ Ingreso Manual / Personalizado</option>
+                      {productos.filter(p => p.categoria !== 'Miel').map(p => (
+                        <option key={p.codigo} value={p.codigo}>{p.descripcion} ({p.unidad})</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Cantidad Entregada</label>
+                      <input 
+                        type="number" required min="1" step="any"
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                        value={insumoCantidad}
+                        onChange={e => setInsumoCantidad(parseFloat(e.target.value) || 1)}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Precio Unitario ($ ARS)</label>
+                      <input 
+                        type="number" required min="0" step="any"
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                        value={insumoPrecioUnitario}
+                        onChange={e => setInsumoPrecioUnitario(parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Precio Ref. de Miel a aplicar ($/kg)</label>
+                    <input 
+                      type="number" required min="1" step="any"
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                      value={newCCForm.precio_referencia_miel}
+                      onChange={e => setNewCCForm({ ...newCCForm, precio_referencia_miel: parseFloat(e.target.value) || 1700 })}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {newCCForm.tipo_transaccion === 'CARGO_ENVASE' && (
+                <div className="card-premium" style={{ backgroundColor: '#FAFBFD', padding: '1rem', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--secondary)', textTransform: 'uppercase' }}>Valorización de Envases (Dólares USD)</span>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '0.5rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Tipo de Envase Cargado</label>
+                      <select 
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
+                        value={envaseTipo}
+                        onChange={e => {
+                          const t = e.target.value as any;
+                          setEnvaseTipo(t);
+                          setEnvasePrecioUnitarioUsd(t === 'TNA' ? 34.0 : 30.5);
+                        }}
+                      >
+                        <option value="TNA">Tambor Nuevo Apto (TNA) - 34.0 USD</option>
+                        <option value="TR">Tambor Usado / Retornable (TR/TRR) - 30.5 USD</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Cantidad</label>
+                      <input 
+                        type="number" required min="1" step="1"
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                        value={envaseCantidad}
+                        onChange={e => setEnvaseCantidad(parseInt(e.target.value) || 1)}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Valor Unitario (USD)</label>
+                      <input 
+                        type="number" required min="1" step="any"
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                        value={envasePrecioUnitarioUsd}
+                        onChange={e => setEnvasePrecioUnitarioUsd(parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Precio Miel Pactado (USD/kg)</label>
+                      <input 
+                        type="number" required min="0.1" step="any"
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                        value={precioMielUsd}
+                        onChange={e => setPrecioMielUsd(parseFloat(e.target.value) || 1.0)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {newCCForm.tipo_transaccion === 'VENTA_LIQUIDACION' && (
+                <div className="card-premium" style={{ backgroundColor: '#FAFBFD', padding: '1rem', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--secondary)', textTransform: 'uppercase' }}>Fijación de Miel y Liquidación</span>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Kilos Miel a Liquidar</label>
+                      <input 
+                        type="number" required min="1" step="any"
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                        value={ventaKilos}
+                        onChange={e => setVentaKilos(parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Precio de Venta ($ ARS/kg)</label>
+                      <input 
+                        type="number" required min="1" step="any"
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                        value={ventaPrecioRef}
+                        onChange={e => setVentaPrecioRef(parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Campos generales que son calculados o editables */}
+              <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem', marginTop: '0.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)' }}>Monto Financiero Final</label>
+                    <input 
+                      type="number" required min="0" step="any"
+                      readOnly={newCCForm.tipo_transaccion !== 'ANTICIPO_CASH' && newCCForm.tipo_transaccion !== 'SALDO_INICIAL' && newCCForm.tipo_transaccion !== 'AJUSTE'}
+                      style={{ 
+                        width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem',
+                        backgroundColor: (newCCForm.tipo_transaccion !== 'ANTICIPO_CASH' && newCCForm.tipo_transaccion !== 'SALDO_INICIAL' && newCCForm.tipo_transaccion !== 'AJUSTE') ? '#F3F4F6' : '#FFFFFF',
+                        fontWeight: 700
+                      }}
+                      value={newCCForm.monto}
+                      onChange={e => setNewCCForm({ ...newCCForm, monto: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)' }}>Miel Equivalente (kg)</label>
+                    <input 
+                      type="number" required step="any"
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontWeight: 700 }}
+                      value={newCCForm.kilos_miel_equiv}
+                      onChange={e => setNewCCForm({ ...newCCForm, kilos_miel_equiv: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--bg-sidebar-active)', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)' }}>RESUMEN DE IMPUTACIÓN COMERCIAL:</span>
+                  <strong style={{ fontSize: '0.8rem', color: newCCForm.kilos_miel_equiv < 0 ? 'var(--danger)' : '#137333' }}>
+                    {newCCForm.kilos_miel_equiv.toLocaleString('es-AR')} kg de miel ({newCCForm.tipo === 'DEBE' ? 'DÉBITO / RESTA' : 'CRÉDITO / SUMA'})
+                  </strong>
+                </div>
+
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Monto Financiero (Efectivo)</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)' }}>Glosa / Detalle en Ficha</label>
                   <input 
-                    type="number" required min="0" step="any"
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                    value={newCCForm.monto}
-                    onChange={e => setNewCCForm({ ...newCCForm, monto: parseFloat(e.target.value) || 0 })}
+                    type="text" required
+                    style={{ width: '100%', padding: '0.625rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    value={newCCForm.detalle}
+                    placeholder="Escriba una glosa comercial..."
+                    onChange={e => setNewCCForm({ ...newCCForm, detalle: e.target.value })}
                   />
                 </div>
-                <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Precio Ref. Pactado con Apicultor (por kg)</label>
-                  <input 
-                    type="number" required min="0" step="any"
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                    value={newCCForm.precio_referencia_miel}
-                    placeholder="Ej: 300 o 1.2"
-                    onChange={e => setNewCCForm({ ...newCCForm, precio_referencia_miel: parseFloat(e.target.value) || 0 })}
-                  />
-                </div>
               </div>
 
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Kilos Miel Equiv. (Ingresar manualmente o dejar en 0 para auto-calcular)</label>
-                <input 
-                  type="number" step="any"
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                  value={newCCForm.kilos_miel_equiv}
-                  placeholder="0 para auto-calcular"
-                  onChange={e => setNewCCForm({ ...newCCForm, kilos_miel_equiv: parseFloat(e.target.value) || 0 })}
-                />
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  Auto-cálculo sugerido: <strong>{newCCForm.precio_referencia_miel > 0 ? (newCCForm.monto / newCCForm.precio_referencia_miel).toFixed(2) : '0.00'} kg</strong> de miel. El negocio con cada apicultor es particular.
-                </span>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Descripción / Detalle</label>
-                <input 
-                  type="text" required
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                  value={newCCForm.detalle}
-                  placeholder="Ej. Retira ahumador - Remito PA-110..."
-                  onChange={e => setNewCCForm({ ...newCCForm, detalle: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                <button type="button" onClick={() => setShowAddCC(false)} style={{ padding: '0.5rem 1rem', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.75rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
+                <button 
+                  type="button" 
+                  onClick={() => setShowAddCC(false)} 
+                  style={{ padding: '0.625rem 1.25rem', border: '1px solid var(--border-color)', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', backgroundColor: '#FFFFFF' }}
+                >
                   Cancelar
                 </button>
-                <button type="submit" style={{ padding: '0.5rem 1rem', backgroundColor: 'var(--secondary)', color: '#FFFFFF', borderRadius: '8px', fontWeight: 600 }}>
-                  Confirmar Registro
+                <button 
+                  type="submit" 
+                  style={{ padding: '0.625rem 1.25rem', backgroundColor: 'var(--secondary)', color: '#FFFFFF', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', border: 'none' }}
+                >
+                  ✓ Confirmar y Registrar
                 </button>
               </div>
             </form>
