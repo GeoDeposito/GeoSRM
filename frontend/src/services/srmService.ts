@@ -905,6 +905,137 @@ export const srmService = {
     return data || [];
   },
 
+  async registrarTcmDesdeExcel(params: {
+    cuit: string;
+    apicultor_nombre: string;
+    fecha: string;
+    romaneo: string;
+    nro_tambor: string;
+    barras_ean: string;
+    lote?: number;
+    kilos_bruto: number;
+    tara: number;
+    color_pfund?: number;
+    humedad?: number;
+    hmf?: number;
+    antibiotico?: string;
+  }): Promise<any> {
+    if (isMockMode) {
+      // 1. Obtener apicultores
+      const apicultores = getMockData<Apicultor>('srm_apicultores');
+      const cleanParamCuit = params.cuit ? params.cuit.replace(/\D/g, '') : '';
+      let apicultor = apicultores.find(a => a.cuit.replace(/\D/g, '') === cleanParamCuit);
+      if (!apicultor && params.apicultor_nombre) {
+        apicultor = apicultores.find(a => a.nombre.toLowerCase() === params.apicultor_nombre.toLowerCase());
+      }
+      if (!apicultor) {
+        // Crear nuevo
+        const nuevoApicultor: Apicultor = {
+          id: 'ap_' + Math.random().toString(36).substr(2, 9),
+          nombre: params.apicultor_nombre || ('Apicultor CUIT ' + params.cuit),
+          cuit: params.cuit || ('99-' + Math.floor(10000000 + Math.random() * 90000000) + '-9'),
+          localidad: 'General Pico',
+          puntuacion: 5.00,
+          etapa: 'PROSPECTO',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        apicultores.push(nuevoApicultor);
+        saveMockData('srm_apicultores', apicultores);
+        apicultor = nuevoApicultor;
+      }
+
+      // 2. Obtener entregas (Romaneos)
+      const entregas = getMockData<FichaEntregaMiel>('srm_entregas');
+      let entrega = entregas.find(e => e.apicultor_id === apicultor!.id && e.romaneo === params.romaneo);
+      
+      const kilosNetosRow = params.kilos_bruto - params.tara;
+      
+      if (entrega) {
+        // Actualizar valores del romaneo
+        entrega.cantidad_tambores += 1;
+        entrega.kilos_neto += kilosNetosRow;
+        if (params.color_pfund) entrega.color_pfund = Math.round((entrega.color_pfund * (entrega.cantidad_tambores - 1) + params.color_pfund) / entrega.cantidad_tambores * 100) / 100;
+        if (params.humedad) entrega.humedad = Math.round((entrega.humedad * (entrega.cantidad_tambores - 1) + params.humedad) / entrega.cantidad_tambores * 100) / 100;
+        if (params.hmf) entrega.hmf = Math.round((entrega.hmf * (entrega.cantidad_tambores - 1) + params.hmf) / entrega.cantidad_tambores * 100) / 100;
+        entrega.updated_at = new Date().toISOString();
+      } else {
+        // Crear nuevo romaneo
+        entrega = {
+          id: 'e_' + Math.random().toString(36).substr(2, 9),
+          apicultor_id: apicultor.id,
+          fecha: params.fecha || new Date().toISOString(),
+          romaneo: params.romaneo,
+          color_pfund: params.color_pfund || 0,
+          humedad: params.humedad || 0,
+          hmf: params.hmf || 0,
+          cantidad_tambores: 1,
+          kilos_neto: kilosNetosRow,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        entregas.push(entrega);
+      }
+      saveMockData('srm_entregas', entregas);
+
+      // 3. Obtener tambores (TCMs)
+      const tambores = getMockData<FichaEntregaTambor>('srm_tambores');
+      let tambor = tambores.find(t => t.nro_tambor === params.nro_tambor);
+      if (tambor) {
+        // Actualizar tambor
+        tambor.entrega_id = entrega.id;
+        tambor.barras_ean = params.barras_ean;
+        tambor.lote = params.lote;
+        tambor.kilos_bruto = params.kilos_bruto;
+        tambor.tara = params.tara;
+        tambor.kilos_neto = kilosNetosRow;
+        if (params.color_pfund !== undefined) tambor.color_pfund = params.color_pfund;
+        if (params.humedad !== undefined) tambor.humedad = params.humedad;
+        if (params.hmf !== undefined) tambor.hmf = params.hmf;
+        tambor.antibiotico = params.antibiotico || 'NEGATIVO';
+      } else {
+        // Crear nuevo
+        tambor = {
+          id: 't_' + Math.random().toString(36).substr(2, 9),
+          entrega_id: entrega.id,
+          nro_tambor: params.nro_tambor,
+          barras_ean: params.barras_ean,
+          lote: params.lote,
+          kilos_bruto: params.kilos_bruto,
+          tara: params.tara,
+          kilos_neto: kilosNetosRow,
+          color_pfund: params.color_pfund,
+          humedad: params.humedad,
+          hmf: params.hmf,
+          antibiotico: params.antibiotico || 'NEGATIVO',
+          created_at: new Date().toISOString()
+        };
+        tambores.push(tambor);
+      }
+      saveMockData('srm_tambores', tambores);
+      return { status: 'OK', message: 'Tambor registrado en Mock Mode' };
+    }
+
+    // Supabase Mode
+    const { data, error } = await supabase!.rpc('registrar_tcm_desde_sharepoint', {
+      p_cuit: params.cuit,
+      p_apicultor_nombre: params.apicultor_nombre,
+      p_fecha: params.fecha,
+      p_romaneo: params.romaneo,
+      p_nro_tambor: params.nro_tambor,
+      p_barras_ean: params.barras_ean,
+      p_lote: params.lote || null,
+      p_kilos_bruto: params.kilos_bruto,
+      p_tara: params.tara,
+      p_color_pfund: params.color_pfund || null,
+      p_humedad: params.humedad || null,
+      p_hmf: params.hmf || null,
+      p_antibiotico: params.antibiotico || 'NEGATIVO'
+    });
+    if (error) throw error;
+    return data;
+  },
+
   async sincronizarTamboresSharepoint(): Promise<{ count: number; kilos: number; message: string }> {
     if (isMockMode) {
       const apics = getMockData<Apicultor>('srm_apicultores');

@@ -38,6 +38,7 @@ export interface FichaEntregaMiel {
   id: string;
   apicultor_id: string;
   fecha: string;
+  romaneo?: string; // Número de Romaneo único
   color_pfund: number; // mm Pfund
   humedad: number; // percentage %
   hmf: number; // mg/kg

@@ -1,5 +1,5 @@
 /* src/App.tsx */
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import { 
   LayoutDashboard, 
   Users, 
@@ -19,6 +19,7 @@ import {
 import { srmService } from './services/srmService';
 import { isMockMode } from './services/supabaseClient';
 import type { Apicultor, ApicultorCompleto, Producto, FichaEntregaMiel } from './types/srm.types';
+import * as XLSX from 'xlsx';
 import './App.css';
 
 
@@ -47,8 +48,11 @@ function App() {
   // Estados de filtros
   const [searchQuery, setSearchQuery] = useState('');
   const [nombreSearchQuery, setNombreSearchQuery] = useState('');
-  const [isSyncingSharepoint, setIsSyncingSharepoint] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [isImportingExcel, setIsImportingExcel] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [importTotal, setImportTotal] = useState(0);
+  const [importErrorCount, setImportErrorCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   
@@ -63,6 +67,11 @@ function App() {
   const [showAddCC, setShowAddCC] = useState(false);
   const [showAddOperculo, setShowAddOperculo] = useState(false);
   const [showPowerAutomateGuide, setShowPowerAutomateGuide] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
+  const [copiedKey, setCopiedKey] = useState(false);
+  const [copiedAuth, setCopiedAuth] = useState(false);
+  const [copiedBody, setCopiedBody] = useState(false);
+  const [syncTab, setSyncTab] = useState<'auto' | 'manual'>('auto');
   
   // Estados de formularios
   const [newApicultorForm, setNewApicultorForm] = useState({
@@ -126,6 +135,7 @@ function App() {
     tag: 'PRODUCTOR',
     notas_onboarding: ''
   });
+  const [expandedRomaneos, setExpandedRomaneos] = useState<Record<string, boolean>>({});
 
   // Estado para la validación de RENAPA
   const [renapaStatus, setRenapaStatus] = useState<{
@@ -353,17 +363,128 @@ function App() {
     }
   };
 
-  const handleSincronizarSharepoint = async () => {
-    setIsSyncingSharepoint(true);
+  const handleImportarExcel = async (file: File) => {
+    setIsImportingExcel(true);
+    setImportProgress(0);
+    setImportTotal(0);
+    setImportErrorCount(0);
     setSyncMessage(null);
+    
     try {
-      const res = await srmService.sincronizarTamboresSharepoint();
-      setSyncMessage(res.message);
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      
+      const sheetName = workbook.SheetNames.find(name => 
+        name.toLowerCase().includes('pesaje') || 
+        name.toLowerCase().includes('romaneo') || 
+        name.toLowerCase().includes('tambor') ||
+        name.toLowerCase().includes('datos')
+      ) || workbook.SheetNames[0];
+      
+      const worksheet = workbook.Sheets[sheetName];
+      const rawRows = XLSX.utils.sheet_to_json(worksheet) as any[];
+      
+      if (rawRows.length === 0) {
+        setSyncMessage("Error: El archivo de Excel está vacío o no contiene hojas legibles.");
+        setIsImportingExcel(false);
+        return;
+      }
+
+      console.log("Filas leídas de Excel:", rawRows.length, rawRows);
+      
+      const findKey = (row: any, keywords: string[]) => {
+        const keys = Object.keys(row);
+        for (const kw of keywords) {
+          const match = keys.find(k => 
+            k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(kw.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""))
+          );
+          if (match) return match;
+        }
+        return null;
+      };
+
+      const mappedRows: any[] = [];
+      for (const row of rawRows) {
+        const kFecha = findKey(row, ['fecha depo', 'fecha', 'deposito']);
+        const kRomaneo = findKey(row, ['romaneo', 'remito', 'entrega']);
+        const kApicultor = findKey(row, ['apicultor', 'nombre', 'proveedor']);
+        const kIdGeo = findKey(row, ['id geo', 'tambor', 'nro_tambor', 'tcm']);
+        const kSenasa = findKey(row, ['senasa', 'barras_ean', 'codigo_senasa', 'ean']);
+        const kBruto = findKey(row, ['peso bruto', 'bruto', 'kilos_bruto']);
+        const kTara = findKey(row, ['tara', 'peso tara']);
+        
+        const kColor = findKey(row, ['color', 'pfund']);
+        const kHumedad = findKey(row, ['humedad', 'hum']);
+        const kHmf = findKey(row, ['hmf']);
+
+        if (!kRomaneo || !kIdGeo) continue;
+
+        let fechaIso = new Date().toISOString();
+        if (kFecha && row[kFecha]) {
+          const fVal = row[kFecha];
+          if (typeof fVal === 'number') {
+            const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+            const msInDay = 24 * 60 * 60 * 1000;
+            fechaIso = new Date(excelEpoch.getTime() + fVal * msInDay).toISOString();
+          } else {
+            try {
+              fechaIso = new Date(fVal).toISOString();
+            } catch (e) {
+              fechaIso = new Date().toISOString();
+            }
+          }
+        }
+
+        const nombreApicultor = kApicultor ? String(row[kApicultor]).trim() : 'Apicultor Desconocido';
+        const brutoVal = kBruto ? parseFloat(String(row[kBruto]).replace(',', '.')) : 300;
+        const taraVal = kTara ? parseFloat(String(row[kTara]).replace(',', '.')) : 16;
+        
+        mappedRows.push({
+          apicultor_nombre: nombreApicultor,
+          cuit: '',
+          fecha: fechaIso,
+          romaneo: String(row[kRomaneo]).trim(),
+          nro_tambor: String(row[kIdGeo]).trim(),
+          barras_ean: kSenasa ? String(row[kSenasa]).trim() : '',
+          lote: 14002,
+          kilos_bruto: isNaN(brutoVal) ? 300 : brutoVal,
+          tara: isNaN(taraVal) ? 16 : taraVal,
+          color_pfund: kColor ? parseFloat(String(row[kColor]).replace(',', '.')) : 34,
+          humedad: kHumedad ? parseFloat(String(row[kHumedad]).replace(',', '.')) : 17.2,
+          hmf: kHmf ? parseFloat(String(row[kHmf]).replace(',', '.')) : 12.5,
+          antibiotico: 'NEGATIVO'
+        });
+      }
+
+      if (mappedRows.length === 0) {
+        setSyncMessage("Error: No se encontraron columnas que coincidan con 'Romaneo' e 'ID GEO'.");
+        setIsImportingExcel(false);
+        return;
+      }
+
+      setImportTotal(mappedRows.length);
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (let i = 0; i < mappedRows.length; i++) {
+        const row = mappedRows[i];
+        try {
+          await srmService.registrarTcmDesdeExcel(row);
+          successCount++;
+        } catch (err) {
+          console.error("Error importando fila de Excel:", row, err);
+          errorCount++;
+        }
+        setImportProgress(i + 1);
+        setImportErrorCount(errorCount);
+      }
+
+      setSyncMessage(`Importación completada. Se procesaron ${mappedRows.length} filas: ${successCount} tambores (TCM) importados/actualizados y ${errorCount} errores.`);
       await cargarApicultores();
-    } catch (err) {
-      setSyncMessage("Error de conexión: No se pudo conectar a la API de SharePoint.");
+    } catch (err: any) {
+      setSyncMessage("Error leyendo el archivo Excel: " + err.message);
     } finally {
-      setIsSyncingSharepoint(false);
+      setIsImportingExcel(false);
     }
   };
 
@@ -1387,7 +1508,7 @@ function App() {
                       backgroundColor: 'var(--secondary)',
                       color: '#FFFFFF',
                       borderRadius: '8px',
-                                          textAlign: 'center',
+                      textAlign: 'center',
                       cursor: 'pointer',
                       border: 'none',
                       transition: 'all 0.15s ease'
@@ -1396,75 +1517,71 @@ function App() {
                     Ver Ficha Completa de Ruiz
                   </button>
                 </div>
-
-                {/* Sincronización SharePoint (TCM) */}
-                <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '320px' }}>
+                
+                {/* Sincronización de Pesajes (TCM) */}
+                <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '340px' }}>
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div>
-                        <span className="badge badge-info" style={{ fontSize: '0.65rem' }}>Integración Externa</span>
+                        <span className="badge badge-success" style={{ fontSize: '0.65rem' }}>Automatización de Pesajes</span>
                         <h3 className="font-title" style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-title)', marginTop: '0.25rem', marginBottom: '0.5rem' }}>
-                          Sincronización SharePoint (TCM)
+                          Base de Datos de Pesajes (TCM)
                         </h3>
                       </div>
-                      <span className="material-symbols-outlined" style={{ color: 'var(--primary)', opacity: 0.7 }}>cloud_sync</span>
+                      <span className="material-symbols-outlined" style={{ color: 'var(--primary)', opacity: 0.7 }}>table_chart</span>
                     </div>
                     <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.4, marginBottom: '0.75rem' }}>
-                      Sincroniza el listado de Tambores con Miel (TCM) y sus especificaciones directamente desde el archivo Excel en SharePoint.
+                      Conecte sus Romaneos y tambores (TCM) del archivo central de SharePoint en tiempo real o cargue manualmente.
                     </p>
-                    
-                    <div style={{
-                      backgroundColor: 'rgba(8,32,26,0.03)',
-                      padding: '0.6rem 0.75rem',
-                      borderRadius: '8px',
-                      fontSize: '0.75rem',
-                      lineHeight: 1.4,
-                      color: 'var(--text-body)',
-                      marginBottom: '1rem'
-                    }}>
-                      <strong style={{ display: 'block', marginBottom: '0.25rem', color: 'var(--primary)' }}>Campos del Excel sincronizados:</strong>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem 0.5rem' }}>
-                        <div>• ID del Tambor</div>
-                        <div>• Fecha de Depósito</div>
-                        <div>• Apicultor Asignado</div>
-                        <div>• Peso Bruto / Tara</div>
-                        <div>• Peso Neto Real</div>
-                        <div>• Código de SENASA</div>
-                        <div>• Color (mm Pfund)</div>
-                        <div>• Humedad / HMF</div>
-                      </div>
-                    </div>
 
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                      <strong style={{ color: 'var(--text-title)' }}>Arquitectura de Enlace:</strong>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.25rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                          <span className="material-symbols-outlined" style={{ fontSize: '0.9rem', color: 'var(--success)' }}>check_circle</span>
-                          <span>Power Automate + Supabase Webhook</span>
-                        </div>
-                        <button 
-                          onClick={() => setShowPowerAutomateGuide(true)}
-                          style={{
-                            alignSelf: 'flex-start',
-                            padding: '0.25rem 0.5rem',
-                            backgroundColor: 'transparent',
-                            color: 'var(--primary)',
-                            border: '1px solid var(--primary)',
-                            borderRadius: '6px',
-                            fontSize: '0.7rem',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            transition: 'all 0.15s ease',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.25rem',
-                            marginTop: '0.2rem'
-                          }}
-                        >
-                          <span className="material-symbols-outlined" style={{ fontSize: '0.8rem' }}>settings</span>
-                          Ver Configuración del Webhook
-                        </button>
-                      </div>
+                    {/* Barra de Pestañas (Tabs) */}
+                    <div style={{ display: 'flex', gap: '0.25rem', padding: '0.2rem', backgroundColor: '#F0F0F0', borderRadius: '8px', marginBottom: '0.75rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => setSyncTab('auto')}
+                        style={{
+                          flex: 1,
+                          padding: '0.4rem',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          borderRadius: '6px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: syncTab === 'auto' ? '#137333' : 'transparent',
+                          color: syncTab === 'auto' ? '#FFFFFF' : 'var(--text-secondary)',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.25rem'
+                        }}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '0.9rem' }}>bolt</span>
+                        Real-Time (Auto)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSyncTab('manual')}
+                        style={{
+                          flex: 1,
+                          padding: '0.4rem',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          borderRadius: '6px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: syncTab === 'manual' ? 'var(--primary)' : 'transparent',
+                          color: syncTab === 'manual' ? '#FFFFFF' : 'var(--text-secondary)',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.25rem'
+                        }}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '0.9rem' }}>upload_file</span>
+                        Carga Manual
+                      </button>
                     </div>
                   </div>
 
@@ -1484,40 +1601,107 @@ function App() {
                       </div>
                     )}
 
-                    <button 
-                      onClick={handleSincronizarSharepoint}
-                      disabled={isSyncingSharepoint}
-                      className="font-title"
-                      style={{
-                        width: '100%',
-                        padding: '0.75rem',
-                        backgroundColor: isSyncingSharepoint ? '#ECEAE9' : 'var(--primary)',
-                        color: isSyncingSharepoint ? 'var(--text-secondary)' : '#FFFFFF',
-                        borderRadius: '8px',
-                        fontWeight: 700,
-                        fontSize: '0.85rem',
-                        textAlign: 'center',
-                        cursor: isSyncingSharepoint ? 'not-allowed' : 'pointer',
-                        border: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '0.5rem',
-                        transition: 'all 0.15s ease'
-                      }}
-                    >
-                      {isSyncingSharepoint ? (
-                        <>
-                          <span className="material-symbols-outlined" style={{ animation: 'spin 1.5s linear infinite', fontSize: '18px' }}>autorenew</span>
-                          Sincronizando Excel...
-                        </>
-                      ) : (
-                        <>
-                          <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>sync</span>
-                          Sincronizar ahora con SharePoint
-                        </>
-                      )}
-                    </button>
+                    {syncTab === 'auto' ? (
+                      <div style={{
+                        backgroundColor: 'rgba(19,115,51,0.04)',
+                        border: '1px solid rgba(19,115,51,0.15)',
+                        padding: '0.8rem',
+                        borderRadius: '10px',
+                        fontSize: '0.75rem',
+                        lineHeight: 1.4,
+                        color: 'var(--text-body)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.4rem' }}>
+                          <span className="material-symbols-outlined" style={{ fontSize: '1.1rem', color: '#137333', fontWeight: 'bold' }}>bolt</span>
+                          <strong style={{ color: '#137333', fontSize: '0.8rem' }}>Ingreso en Tiempo Real</strong>
+                        </div>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', margin: '0 0 0.6rem 0' }}>
+                          Conecte su Power Automate para insertar cada tambor (TCM) automáticamente en el SRM en cuanto se agregue una fila en el Excel de SharePoint.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setShowPowerAutomateGuide(true)}
+                          style={{
+                            width: '100%',
+                            padding: '0.6rem',
+                            backgroundColor: '#137333',
+                            color: '#FFFFFF',
+                            border: 'none',
+                            borderRadius: '8px',
+                            fontWeight: 700,
+                            fontSize: '0.75rem',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '0.3rem',
+                            boxShadow: '0 2px 4px rgba(19,115,51,0.15)',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '0.95rem' }}>settings_ethernet</span>
+                          Configurar Conexión Real-Time
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        {isImportingExcel ? (
+                          <div style={{
+                            padding: '0.8rem',
+                            backgroundColor: '#F9F9F9',
+                            borderRadius: '10px',
+                            border: '1px solid var(--border-color)',
+                            textAlign: 'center'
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                              <span className="material-symbols-outlined spinning" style={{ color: 'var(--primary)', fontSize: '1.2rem' }}>sync</span>
+                              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-title)' }}>Procesando planilla Excel...</span>
+                            </div>
+                            <div style={{ height: '6px', backgroundColor: '#E0E0E0', borderRadius: '3px', overflow: 'hidden', marginBottom: '0.25rem' }}>
+                              <div style={{ height: '100%', backgroundColor: 'var(--primary)', width: `${(importProgress / importTotal) * 100}%`, transition: 'width 0.1s ease' }} />
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
+                              <span>Cargados: {importProgress} de {importTotal}</span>
+                              {importErrorCount > 0 && <span style={{ color: 'var(--danger)' }}>Errores: {importErrorCount}</span>}
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <input 
+                              type="file" 
+                              accept=".xlsx, .xls"
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files[0]) {
+                                  handleImportarExcel(e.target.files[0]);
+                                }
+                              }}
+                              style={{ display: 'none' }}
+                              id="excel-upload-input"
+                            />
+                            <label 
+                              htmlFor="excel-upload-input"
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                border: '2px dashed var(--primary)',
+                                borderRadius: '12px',
+                                padding: '0.75rem',
+                                backgroundColor: 'rgba(242, 172, 22, 0.02)',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                                textAlign: 'center'
+                              }}
+                            >
+                              <span className="material-symbols-outlined" style={{ fontSize: '1.6rem', color: 'var(--primary)', marginBottom: '0.2rem' }}>upload_file</span>
+                              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)' }}>Cargar Planilla (.xlsx)</span>
+                              <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Seleccione o arrastre el archivo central</span>
+                            </label>
+                          </>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -2615,7 +2799,7 @@ function App() {
                           apicultorSeleccionado.entregas.forEach(e => {
                             list.push({
                               fecha: e.fecha,
-                              operacion: `Entrega de Cosecha (Lote #${e.id.slice(0, 4).toUpperCase()})`,
+                              operacion: `Romaneo #${e.romaneo || 'S/N'} (${e.cantidad_tambores} TCM)`,
                               tambores: e.cantidad_tambores,
                               importe: e.kilos_neto.toLocaleString() + ' kg',
                               est: 'Procesado',
@@ -2699,7 +2883,7 @@ function App() {
                     <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', gap: '1rem', overflowX: 'auto', marginBottom: '1rem' }}>
                       {[
                         { id: 'general', label: 'Ficha Impositiva' },
-                        { id: 'entregas', label: `Muestreos de Calidad (${apicultorSeleccionado.entregas.length})` },
+                        { id: 'entregas', label: `Historial de Romaneos (${apicultorSeleccionado.entregas.length})` },
                         { id: 'envases', label: 'Envases Detalle' },
                         { id: 'cuenta_corriente', label: 'Cuenta Corriente / Kilos Equivalentes' },
                         { id: 'operculo', label: `Opérculo y Cera (${apicultorSeleccionado.operculo?.length || 0})` }
@@ -2754,34 +2938,129 @@ function App() {
                         <table className="table-premium">
                           <thead>
                             <tr>
+                              <th style={{ width: '40px' }}></th>
+                              <th>Romaneo</th>
                               <th>Fecha</th>
-                              <th>Color Pfund</th>
-                              <th>Humedad (%)</th>
-                              <th>HMF (mg/kg)</th>
-                              <th>Tambores</th>
-                              <th>Kilos Neto</th>
+                              <th>Color Promedio</th>
+                              <th>Humedad Promedio</th>
+                              <th>HMF Promedio</th>
+                              <th>Tambores (TCM)</th>
+                              <th>Kilos Neto Total</th>
                             </tr>
                           </thead>
                           <tbody>
                             {apicultorSeleccionado.entregas.length === 0 ? (
                               <tr>
-                                <td colSpan={6} style={{ textAlign: 'center', padding: '1rem' }}>No hay entregas registradas.</td>
+                                <td colSpan={8} style={{ textAlign: 'center', padding: '1rem' }}>No hay romaneos registrados.</td>
                               </tr>
                             ) : (
-                              apicultorSeleccionado.entregas.map((e) => (
-                                <tr key={e.id}>
-                                  <td className="font-mono">{new Date(e.fecha).toLocaleDateString()}</td>
-                                  <td className="font-mono">{e.color_pfund} mm</td>
-                                  <td className="font-mono" style={{ fontWeight: 700, color: e.humedad > 18 ? 'var(--danger)' : 'var(--text-title)' }}>
-                                    {e.humedad}%
-                                  </td>
-                                  <td className="font-mono" style={{ fontWeight: 700, color: e.hmf > 40 ? 'var(--danger)' : 'var(--text-title)' }}>
-                                    {e.hmf} mg/kg
-                                  </td>
-                                  <td className="font-mono">{e.cantidad_tambores}</td>
-                                  <td className="font-mono" style={{ fontWeight: 700 }}>{e.kilos_neto.toLocaleString()} kg</td>
-                                </tr>
-                              ))
+                              apicultorSeleccionado.entregas.map((e) => {
+                                const isExpanded = !!expandedRomaneos[e.id];
+                                return (
+                                  <Fragment key={e.id}>
+                                    <tr 
+                                      onClick={() => setExpandedRomaneos({
+                                        ...expandedRomaneos,
+                                        [e.id]: !isExpanded
+                                      })}
+                                      style={{ cursor: 'pointer' }}
+                                      className="table-row-hover"
+                                    >
+                                      <td style={{ textAlign: 'center' }}>
+                                        <span className="material-symbols-outlined" style={{ 
+                                          fontSize: '1.2rem', 
+                                          color: 'var(--primary)',
+                                          transform: isExpanded ? 'rotate(90deg)' : 'none',
+                                          transition: 'transform 0.15s ease'
+                                        }}>
+                                          chevron_right
+                                        </span>
+                                      </td>
+                                      <td>
+                                        <strong style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>
+                                          #{e.romaneo || 'S/N'}
+                                        </strong>
+                                      </td>
+                                      <td className="font-mono">{new Date(e.fecha).toLocaleDateString()}</td>
+                                      <td className="font-mono">{e.color_pfund} mm</td>
+                                      <td className="font-mono" style={{ fontWeight: 700, color: e.humedad > 18 ? 'var(--danger)' : 'var(--text-title)' }}>
+                                        {e.humedad}%
+                                      </td>
+                                      <td className="font-mono" style={{ fontWeight: 700, color: e.hmf > 40 ? 'var(--danger)' : 'var(--text-title)' }}>
+                                        {e.hmf} mg/kg
+                                      </td>
+                                      <td className="font-mono">{e.cantidad_tambores} TCM</td>
+                                      <td className="font-mono" style={{ fontWeight: 700 }}>{e.kilos_neto.toLocaleString()} kg</td>
+                                    </tr>
+                                    
+                                    {isExpanded && (
+                                      <tr>
+                                        <td colSpan={8} style={{ backgroundColor: 'rgba(242, 172, 22, 0.01)', padding: '0.75rem 1rem' }}>
+                                          <div style={{
+                                            borderLeft: '3px solid var(--primary)',
+                                            paddingLeft: '1rem',
+                                            paddingTop: '0.25rem',
+                                            paddingBottom: '0.25rem',
+                                            margin: '0.25rem 0'
+                                          }}>
+                                            <h4 className="font-title" style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-title)', textTransform: 'uppercase', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                              <span className="material-symbols-outlined" style={{ fontSize: '1rem', color: 'var(--primary)' }}>science</span>
+                                              Detalle Técnico de Tambores (TCMs) del Romaneo #{e.romaneo || 'S/N'}
+                                            </h4>
+                                            
+                                            {(!e.tambores || e.tambores.length === 0) ? (
+                                              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>No hay tambores individuales registrados para este romaneo.</p>
+                                            ) : (
+                                              <div className="table-container" style={{ margin: '0.5rem 0', boxShadow: 'none', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                                                <table className="table-premium" style={{ width: '100%', fontSize: '0.75rem' }}>
+                                                  <thead>
+                                                    <tr style={{ backgroundColor: '#F9F9F9' }}>
+                                                      <th>ID GEO (Tambor)</th>
+                                                      <th>Cod. SENASA</th>
+                                                      <th>Lote</th>
+                                                      <th style={{ textAlign: 'right' }}>Peso Bruto</th>
+                                                      <th style={{ textAlign: 'right' }}>Tara</th>
+                                                      <th style={{ textAlign: 'right' }}>Peso Neto</th>
+                                                      <th style={{ textAlign: 'center' }}>Humedad</th>
+                                                      <th style={{ textAlign: 'center' }}>Color (mm)</th>
+                                                      <th style={{ textAlign: 'center' }}>HMF</th>
+                                                      <th>Antibiótico</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody>
+                                                    {e.tambores.map((t) => (
+                                                      <tr key={t.id} style={{ backgroundColor: '#FFFFFF' }}>
+                                                        <td><strong style={{ color: 'var(--text-title)', fontFamily: 'monospace' }}>{t.nro_tambor}</strong></td>
+                                                        <td className="font-mono">{t.barras_ean || '-'}</td>
+                                                        <td className="font-mono">{t.lote || '-'}</td>
+                                                        <td className="font-mono text-right">{t.kilos_bruto.toFixed(1)} kg</td>
+                                                        <td className="font-mono text-right">{t.tara.toFixed(1)} kg</td>
+                                                        <td className="font-mono text-right" style={{ fontWeight: 700 }}>{t.kilos_neto.toFixed(1)} kg</td>
+                                                        <td className="font-mono text-center" style={{ fontWeight: 700, color: t.humedad && t.humedad > 18 ? 'var(--danger)' : 'var(--text-title)' }}>
+                                                          {t.humedad !== undefined ? `${t.humedad}%` : '-'}
+                                                        </td>
+                                                        <td className="font-mono text-center">{t.color_pfund !== undefined ? `${t.color_pfund} mm` : '-'}</td>
+                                                        <td className="font-mono text-center" style={{ fontWeight: 700, color: t.hmf && t.hmf > 40 ? 'var(--danger)' : 'var(--text-title)' }}>
+                                                          {t.hmf !== undefined ? `${t.hmf} mg/kg` : '-'}
+                                                        </td>
+                                                        <td>
+                                                          <span className={`badge ${t.antibiotico === 'POSITIVO' ? 'badge-danger' : 'badge-success'}`} style={{ fontSize: '0.6rem', padding: '0.15rem 0.35rem' }}>
+                                                            {t.antibiotico || 'NEGATIVO'}
+                                                          </span>
+                                                        </td>
+                                                      </tr>
+                                                    ))}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </Fragment>
+                                );
+                              })
                             )}
                           </tbody>
                         </table>
@@ -4074,172 +4353,265 @@ function App() {
       {showPowerAutomateGuide && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 999, padding: '1rem'
+          backgroundColor: 'rgba(8,32,26,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 999, padding: '1rem', backdropFilter: 'blur(4px)'
         }}>
-          <div className="card-premium" style={{ width: '100%', maxWidth: '750px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
-              <h3 className="font-title" style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-title)', display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
-                <span className="material-symbols-outlined" style={{ color: 'var(--primary)', fontSize: '1.4rem' }}>settings_ethernet</span>
-                Configuración de Webhook (Power Automate & SharePoint)
+          <div className="card-premium" style={{ width: '100%', maxWidth: '800px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1.25rem', padding: '1.5rem', borderRadius: '16px', border: '1px solid var(--border-color)', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
+              <h3 className="font-title" style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)', display: 'flex', alignItems: 'center', gap: '0.6rem', margin: 0 }}>
+                <span className="material-symbols-outlined" style={{ color: '#137333', fontSize: '1.6rem' }}>bolt</span>
+                Asistente de Ingestión en Tiempo Real (Power Automate)
               </h3>
               <button 
                 onClick={() => setShowPowerAutomateGuide(false)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--text-secondary)' }}
               >
-                <span className="material-symbols-outlined">close</span>
+                <span className="material-symbols-outlined" style={{ fontSize: '1.4rem' }}>close</span>
               </button>
             </div>
 
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-body)', lineHeight: 1.5, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <p>
-                Como las filas de tambores con miel (TCM) se agregan a su archivo de Excel mediante Power Automate, puede conectar ese mismo flujo directamente a Supabase. De esta forma, el <strong>APICULTOR SRM</strong> se actualizará en tiempo real sin requerir acciones manuales.
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-body)', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <p style={{ margin: 0 }}>
+                Para evitar tener que cargar manualmente el archivo Excel, configure su flujo actual de <strong>Power Automate</strong> para que envíe cada tambor (TCM) al SRM en tiempo real en cuanto se pesen. Siga estos <strong>4 pasos simples</strong>:
               </p>
 
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}>
-                <div style={{ backgroundColor: 'rgba(8,32,26,0.03)', padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--border-color)', fontWeight: 700, color: 'var(--primary)', fontSize: '0.75rem' }}>
-                  CONFIGURACIÓN DE LA ACCIÓN HTTP EN POWER AUTOMATE
+              {/* Paso 1 */}
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(19,115,51,0.1)', color: '#137333', fontWeight: 800, fontSize: '0.8rem', flexShrink: 0 }}>1</div>
+                <div>
+                  <strong style={{ color: 'var(--text-title)', fontSize: '0.9rem' }}>Abra su flujo en Power Automate</strong>
+                  <span style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    Ingrese a Power Automate, edite su flujo actual de pesajes y ubique el bucle <strong>"Aplicar a cada fila"</strong> (Apply to each) donde procesa los datos del archivo Excel entrante.
+                  </span>
                 </div>
-                <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  <div>
-                    <strong style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Método HTTP</strong>
-                    <span style={{ fontFamily: 'monospace', backgroundColor: '#E8F5E9', color: '#2E7D32', padding: '0.15rem 0.4rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>POST</span>
-                  </div>
-                  <div>
-                    <strong style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>URI del Webhook</strong>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.2rem' }}>
-                      <input 
-                        type="text" 
-                        readOnly 
-                        value="https://ajrfkkiuludrdexgprmb.supabase.co/rest/v1/rpc/registrar_tcm_desde_sharepoint" 
-                        style={{ flex: 1, padding: '0.4rem', fontFamily: 'monospace', fontSize: '0.7rem', border: '1px solid var(--border-color)', borderRadius: '4px', backgroundColor: '#F9F9F9', color: 'var(--text-body)' }}
-                      />
-                      <button 
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText("https://ajrfkkiuludrdexgprmb.supabase.co/rest/v1/rpc/registrar_tcm_desde_sharepoint");
-                          alert("¡URL copiada al portapapeles!");
-                        }}
-                        style={{ padding: '0.4rem 0.75rem', backgroundColor: 'var(--primary)', color: '#FFFFFF', border: 'none', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer' }}
-                      >
-                        Copiar
-                      </button>
+              </div>
+
+              {/* Paso 2 */}
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(19,115,51,0.1)', color: '#137333', fontWeight: 800, fontSize: '0.8rem', flexShrink: 0 }}>2</div>
+                <div>
+                  <strong style={{ color: 'var(--text-title)', fontSize: '0.9rem' }}>Agregue una acción HTTP</strong>
+                  <span style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    Al final de las acciones dentro de ese bucle, haga clic en <strong>"Agregar una acción"</strong>, busque el conector verde **"HTTP"** y seleccione la acción estándar **"HTTP"** (método POST).
+                  </span>
+                </div>
+              </div>
+
+              {/* Paso 3 */}
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(19,115,51,0.1)', color: '#137333', fontWeight: 800, fontSize: '0.8rem', flexShrink: 0 }}>3</div>
+                <div style={{ flex: 1 }}>
+                  <strong style={{ color: 'var(--text-title)', fontSize: '0.9rem' }}>Complete la configuración de la acción HTTP</strong>
+                  <span style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                    Configure la tarjeta HTTP con los siguientes parámetros. Haga clic en copiar en cada campo para pegarlos directamente:
+                  </span>
+
+                  {/* Power Automate HTTP Mock UI */}
+                  <div style={{ border: '1px solid #E0E0E0', borderRadius: '10px', backgroundColor: '#FAFADA', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.02)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', borderBottom: '1px solid #E0E0E0', paddingBottom: '0.4rem' }}>
+                      <span className="material-symbols-outlined" style={{ color: '#137333', fontSize: '1.2rem' }}>dns</span>
+                      <strong style={{ fontSize: '0.8rem', color: '#137333' }}>HTTP (Acción de Power Automate)</strong>
                     </div>
-                  </div>
-                  <div>
-                    <strong style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Cabeceras (Headers)</strong>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontFamily: 'monospace', fontSize: '0.7rem', backgroundColor: '#F5F5F5', padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', color: 'var(--text-body)' }}>
-                      <div><strong>Content-Type:</strong> application/json</div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span><strong>apikey:</strong> sb_publishable_bYlB4bsuJyv7nMOUXrs...</span>
+
+                    <div>
+                      <strong style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Método</strong>
+                      <span style={{ fontFamily: 'monospace', backgroundColor: '#E8F5E9', color: '#2E7D32', padding: '0.15rem 0.4rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>POST</span>
+                    </div>
+
+                    <div>
+                      <strong style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>URI</strong>
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.2rem' }}>
+                        <input 
+                          type="text" 
+                          readOnly 
+                          value="https://ajrfkkiuludrdexgprmb.supabase.co/rest/v1/rpc/registrar_tcm_desde_sharepoint" 
+                          style={{ flex: 1, padding: '0.4rem', fontFamily: 'monospace', fontSize: '0.7rem', border: '1px solid #CCC', borderRadius: '4px', backgroundColor: '#FFFFFF', color: 'var(--text-body)' }}
+                        />
                         <button 
                           type="button"
                           onClick={() => {
-                            navigator.clipboard.writeText("sb_publishable_bYlB4bsuJyv7nMOUXrsRew_ubUacX2Q");
-                            alert("¡API Key copiada!");
+                            navigator.clipboard.writeText("https://ajrfkkiuludrdexgprmb.supabase.co/rest/v1/rpc/registrar_tcm_desde_sharepoint");
+                            setCopiedUrl(true);
+                            setTimeout(() => setCopiedUrl(false), 2000);
                           }}
-                          style={{ padding: '0.1rem 0.3rem', fontSize: '0.6rem', backgroundColor: '#E0E0E0', border: 'none', borderRadius: '3px', cursor: 'pointer', fontWeight: 600 }}
-                        >Copiar Completa</button>
+                          style={{ 
+                            padding: '0.4rem 0.75rem', 
+                            backgroundColor: copiedUrl ? '#137333' : 'var(--primary)', 
+                            color: '#FFFFFF', 
+                            border: 'none', 
+                            borderRadius: '4px', 
+                            fontSize: '0.7rem', 
+                            fontWeight: 700, 
+                            cursor: 'pointer',
+                            minWidth: '80px',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          {copiedUrl ? '¡Copiado!' : 'Copiar'}
+                        </button>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span><strong>Authorization:</strong> Bearer sb_publishable_bYlB4bsuJyv7nMOUXrs...</span>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText("Bearer sb_publishable_bYlB4bsuJyv7nMOUXrsRew_ubUacX2Q");
-                            alert("¡Header Authorization copiado!");
-                          }}
-                          style={{ padding: '0.1rem 0.3rem', fontSize: '0.6rem', backgroundColor: '#E0E0E0', border: 'none', borderRadius: '3px', cursor: 'pointer', fontWeight: 600 }}
-                        >Copiar Completo</button>
+                    </div>
+
+                    <div>
+                      <strong style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Encabezados (Headers)</strong>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontFamily: 'monospace', fontSize: '0.7rem', backgroundColor: '#FFFFFF', padding: '0.5rem', borderRadius: '6px', border: '1px solid #D1D1D1', color: 'var(--text-body)' }}>
+                        <div style={{ borderBottom: '1px solid #F0F0F0', paddingBottom: '0.25rem' }}>
+                          <strong>Content-Type:</strong> application/json
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #F0F0F0', paddingBottom: '0.25rem' }}>
+                          <span><strong>apikey:</strong> sb_publishable_bYlB4bsuJyv7nMOUXrs...</span>
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText("sb_publishable_bYlB4bsuJyv7nMOUXrsRew_ubUacX2Q");
+                              setCopiedKey(true);
+                              setTimeout(() => setCopiedKey(false), 2000);
+                            }}
+                            style={{ 
+                              padding: '0.15rem 0.4rem', 
+                              fontSize: '0.65rem', 
+                              backgroundColor: copiedKey ? '#E8F5E9' : '#E0E0E0', 
+                              color: copiedKey ? '#2E7D32' : 'var(--text-body)',
+                              border: 'none', 
+                              borderRadius: '3px', 
+                              cursor: 'pointer', 
+                              fontWeight: 700,
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            {copiedKey ? '¡Copiado!' : 'Copiar'}
+                          </button>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span><strong>Authorization:</strong> Bearer sb_publishable_bYlB4bsuJyv7nMOUXrs...</span>
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText("Bearer sb_publishable_bYlB4bsuJyv7nMOUXrsRew_ubUacX2Q");
+                              setCopiedAuth(true);
+                              setTimeout(() => setCopiedAuth(false), 2000);
+                            }}
+                            style={{ 
+                              padding: '0.15rem 0.4rem', 
+                              fontSize: '0.65rem', 
+                              backgroundColor: copiedAuth ? '#E8F5E9' : '#E0E0E0', 
+                              color: copiedAuth ? '#2E7D32' : 'var(--text-body)',
+                              border: 'none', 
+                              borderRadius: '3px', 
+                              cursor: 'pointer', 
+                              fontWeight: 700,
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            {copiedAuth ? '¡Copiado!' : 'Copiar'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}>
-                <div style={{ backgroundColor: 'rgba(8,32,26,0.03)', padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--border-color)', fontWeight: 700, color: 'var(--primary)', fontSize: '0.75rem' }}>
-                  CUERPO (JSON BODY) DE LA ACCIÓN EN POWER AUTOMATE
-                </div>
-                <div style={{ padding: '0.75rem' }}>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-                    Pegue este JSON en el campo "Cuerpo" de su acción HTTP, asociando cada parámetro con las columnas dinámicas de su Excel:
-                  </p>
-                  <pre style={{
-                    backgroundColor: '#1E1E1E',
-                    color: '#D4D4D4',
-                    padding: '0.75rem',
-                    borderRadius: '6px',
-                    fontFamily: 'monospace',
-                    fontSize: '0.7rem',
-                    overflowX: 'auto',
-                    margin: 0,
-                    lineHeight: 1.4
-                  }}>
+              {/* Paso 4 */}
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(19,115,51,0.1)', color: '#137333', fontWeight: 800, fontSize: '0.8rem', flexShrink: 0 }}>4</div>
+                <div style={{ flex: 1 }}>
+                  <strong style={{ color: 'var(--text-title)', fontSize: '0.9rem' }}>Copie y mapee el Cuerpo JSON</strong>
+                  <span style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                    Copie este JSON y péguelo en el campo <strong>"Cuerpo"</strong> (Body) de su acción HTTP. Luego, reemplace los valores por los campos dinámicos correspondientes a su Excel de SharePoint:
+                  </span>
+
+                  <div style={{ position: 'relative' }}>
+                    <pre style={{
+                      backgroundColor: '#1E1E1E',
+                      color: '#D4D4D4',
+                      padding: '0.75rem',
+                      borderRadius: '8px',
+                      fontFamily: 'monospace',
+                      fontSize: '0.7rem',
+                      overflowX: 'auto',
+                      margin: 0,
+                      lineHeight: 1.4,
+                      border: '1px solid #333'
+                    }}>
 {`{
-  "p_cuit": "@{items('Aplicar_a_cada_fila')?['CUIT']}",
+  "p_cuit": "",
   "p_apicultor_nombre": "@{items('Aplicar_a_cada_fila')?['Apicultor']}",
-  "p_fecha": "@{items('Aplicar_a_cada_fila')?['Fecha_Deposito']}",
-  "p_nro_tambor": "@{items('Aplicar_a_cada_fila')?['ID_Tambor']}",
-  "p_barras_ean": "@{items('Aplicar_a_cada_fila')?['Codigo_SENASA']}",
-  "p_lote": @{coalesce(items('Aplicar_a_cada_fila')?['Lote'], 0)},
-  "p_kilos_bruto": @{items('Aplicar_a_cada_fila')?['Peso_Bruto']},
-  "p_tara": @{items('Aplicar_a_cada_fila')?['Tara']},
-  "p_color_pfund": @{coalesce(items('Aplicar_a_cada_fila')?['Color'], 0)},
-  "p_humedad": @{coalesce(items('Aplicar_a_cada_fila')?['Humedad'], 0)},
-  "p_hmf": @{coalesce(items('Aplicar_a_cada_fila')?['HMF'], 0)},
-  "p_antibiotico": "NEGATIVO"
+  "p_fecha": "@{items('Aplicar_a_cada_fila')?['Fecha Depo']}",
+  "p_romaneo": "@{items('Aplicar_a_cada_fila')?['Romaneo']}",
+  "p_nro_tambor": "@{items('Aplicar_a_cada_fila')?['ID GEO']}",
+  "p_barras_ean": "@{items('Aplicar_a_cada_fila')?['SENASA']}",
+  "p_kilos_bruto": @{coalesce(items('Aplicar_a_cada_fila')?['Peso Bruto'], 300)},
+  "p_tara": @{coalesce(items('Aplicar_a_cada_fila')?['Tara'], 16)},
+  "p_color_pfund": @{coalesce(items('Aplicar_a_cada_fila')?['Color'], null)},
+  "p_humedad": @{coalesce(items('Aplicar_a_cada_fila')?['Humedad'], null)},
+  "p_hmf": @{coalesce(items('Aplicar_a_cada_fila')?['HMF'], null)}
 }`}
-                  </pre>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                    </pre>
                     <button 
                       type="button"
                       onClick={() => {
                         const bodyTemplate = `{
-  "p_cuit": "@{items('Aplicar_a_cada_fila')?['CUIT']}",
+  "p_cuit": "",
   "p_apicultor_nombre": "@{items('Aplicar_a_cada_fila')?['Apicultor']}",
-  "p_fecha": "@{items('Aplicar_a_cada_fila')?['Fecha_Deposito']}",
-  "p_nro_tambor": "@{items('Aplicar_a_cada_fila')?['ID_Tambor']}",
-  "p_barras_ean": "@{items('Aplicar_a_cada_fila')?['Codigo_SENASA']}",
-  "p_lote": 14002,
-  "p_kilos_bruto": 300,
-  "p_tara": 16,
-  "p_color_pfund": 34,
-  "p_humedad": 17.2,
-  "p_hmf": 12.5,
-  "p_antibiotico": "NEGATIVO"
+  "p_fecha": "@{items('Aplicar_a_cada_fila')?['Fecha Depo']}",
+  "p_romaneo": "@{items('Aplicar_a_cada_fila')?['Romaneo']}",
+  "p_nro_tambor": "@{items('Aplicar_a_cada_fila')?['ID GEO']}",
+  "p_barras_ean": "@{items('Aplicar_a_cada_fila')?['SENASA']}",
+  "p_kilos_bruto": @{coalesce(items('Aplicar_a_cada_fila')?['Peso Bruto'], 300)},
+  "p_tara": @{coalesce(items('Aplicar_a_cada_fila')?['Tara'], 16)},
+  "p_color_pfund": @{coalesce(items('Aplicar_a_cada_fila')?['Color'], null)},
+  "p_humedad": @{coalesce(items('Aplicar_a_cada_fila')?['Humedad'], null)},
+  "p_hmf": @{coalesce(items('Aplicar_a_cada_fila')?['HMF'], null)}
 }`;
                         navigator.clipboard.writeText(bodyTemplate);
-                        alert("¡Cuerpo JSON copiado al portapapeles!");
+                        setCopiedBody(true);
+                        setTimeout(() => setCopiedBody(false), 2000);
                       }}
-                      style={{ padding: '0.3rem 0.6rem', backgroundColor: '#F0F0F0', border: '1px solid #CCC', borderRadius: '4px', fontSize: '0.7rem', cursor: 'pointer', fontWeight: 700, color: 'var(--text-body)' }}
+                      style={{ 
+                        position: 'absolute', 
+                        top: '8px', 
+                        right: '8px', 
+                        padding: '0.3rem 0.6rem', 
+                        backgroundColor: copiedBody ? '#137333' : 'rgba(255,255,255,0.15)', 
+                        color: '#FFFFFF', 
+                        border: 'none', 
+                        borderRadius: '4px', 
+                        fontSize: '0.65rem', 
+                        fontWeight: 700, 
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
                     >
-                      Copiar Cuerpo JSON
+                      {copiedBody ? '¡Copiado!' : 'Copiar Cuerpo'}
                     </button>
                   </div>
+                  <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.3rem' }}>
+                    * Si los nombres de columnas de su planilla en SharePoint difieren (ej. "Nro Tambor" en vez de "ID GEO"), ajuste el nombre dentro del JSON en Power Automate para que coincidan.
+                  </span>
                 </div>
               </div>
 
-              <div style={{ backgroundColor: 'rgba(255,193,7,0.08)', border: '1px solid #FFE082', borderRadius: '8px', padding: '0.75rem', fontSize: '0.75rem', color: '#B78103' }}>
-                <strong style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>warning</span>
-                  Beneficios del Webhook Inteligente en la Base de Datos:
+              <div style={{ backgroundColor: 'rgba(19,115,51,0.06)', border: '1px solid rgba(19,115,51,0.2)', borderRadius: '10px', padding: '0.75rem', fontSize: '0.75rem', color: '#137333' }}>
+                <strong style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.15rem' }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '1.1rem' }}>info</span>
+                  ¿Qué hace este Webhook automáticamente?
                 </strong>
-                <ul style={{ margin: '0.25rem 0 0 1.25rem', padding: 0, display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                  <li><strong>Auto-asociación:</strong> El webhook busca al apicultor por CUIT. Si no está registrado en el SRM, crea automáticamente un registro temporal (etapa Prospecto) para no perder los datos.</li>
-                  <li><strong>Agrupación por Día:</strong> Agrupa automáticamente múltiples tambores del mismo apicultor entregados en una misma fecha en una única "Ficha de Entrega de Miel" (calculando promedios ponderados de humedad, color y HMF).</li>
-                  <li><strong>Control de Duplicados:</strong> Si por error de flujo Power Automate vuelve a enviar un tambor existente, el SRM actualiza sus datos en lugar de duplicar el tambor.</li>
+                <ul style={{ margin: '0.15rem 0 0 1.25rem', padding: 0, display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                  <li><strong>Busca al Apicultor:</strong> Si el apicultor no está registrado en el SRM, crea un perfil temporal en etapa Prospecto para guardar de inmediato los tambores.</li>
+                  <li><strong>Crea o Asocia el Romaneo:</strong> Agrupa automáticamente múltiples tambores del mismo Romaneo en un registro unificado, calculando los promedios organolépticos (color, humedad, HMF).</li>
+                  <li><strong>Controla Duplicados:</strong> Si un tambor (ID GEO) ya existe, actualiza sus datos en lugar de duplicarlo.</li>
                 </ul>
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', marginTop: '0.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '1rem', marginTop: '0.5rem' }}>
               <button 
                 type="button"
                 onClick={() => setShowPowerAutomateGuide(false)} 
-                style={{ padding: '0.5rem 1.25rem', backgroundColor: 'var(--primary)', color: '#FFFFFF', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: 700, cursor: 'pointer' }}
+                style={{ padding: '0.5rem 1.5rem', backgroundColor: '#137333', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 4px rgba(19,115,51,0.2)' }}
               >
-                Cerrar Guía
+                Cerrar Asistente
               </button>
             </div>
           </div>
