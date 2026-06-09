@@ -1,5 +1,5 @@
 /* src/App.tsx */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   LayoutDashboard, 
   Users, 
@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { srmService } from './services/srmService';
 import { isMockMode } from './services/supabaseClient';
-import type { Apicultor, ApicultorCompleto, Producto } from './types/srm.types';
+import type { Apicultor, ApicultorCompleto, Producto, FichaEntregaMiel } from './types/srm.types';
 import './App.css';
 
 
@@ -31,6 +31,7 @@ function App() {
   const [filtroAlerta, setFiltroAlerta] = useState(false);
   const [activeTab, setActiveTab] = useState<'general' | 'entregas' | 'envases' | 'cuenta_corriente' | 'operculo'>('general');
   const [productos, setProductos] = useState<Producto[]>([]);
+  const [entregas, setEntregas] = useState<FichaEntregaMiel[]>([]);
   const [globalStats, setGlobalStats] = useState<{
     totalKilosMiel: number;
     totalTamboresCampo: number;
@@ -45,6 +46,9 @@ function App() {
   
   // Estados de filtros
   const [searchQuery, setSearchQuery] = useState('');
+  const [nombreSearchQuery, setNombreSearchQuery] = useState('');
+  const [isSyncingSharepoint, setIsSyncingSharepoint] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   
@@ -223,6 +227,8 @@ function App() {
       setGlobalStats(stats);
       const prods = await srmService.listProductos();
       setProductos(prods);
+      const listE = await srmService.listAllEntregas();
+      setEntregas(listE);
     } catch (e) {
       console.error('Error cargando apicultores y productos:', e);
     }
@@ -238,6 +244,75 @@ function App() {
       console.error('Error al obtener ficha completa:', e);
     }
   };
+  // Helper para extraer DNI desde CUIT (remueve prefijo de 2 dígitos y sufijo de 1 dígito)
+  const extraerDniDeCuit = (cuit: string): string => {
+    const clean = cuit.replace(/\D/g, '');
+    if (clean.length >= 10) {
+      return clean.slice(2, clean.length - 1);
+    }
+    return '';
+  };
+
+  // Categorización Pareto 80/20 dinámica basada en volumen neto acumulado
+  const apicultoresCategorizados = useMemo(() => {
+    const kilosPorApicultor: { [apicultorId: string]: number } = {};
+    
+    // Inicializar
+    apicultores.forEach(a => {
+      kilosPorApicultor[a.id] = 0;
+    });
+    
+    // Sumar entregas
+    entregas.forEach(e => {
+      if (kilosPorApicultor[e.apicultor_id] !== undefined) {
+        kilosPorApicultor[e.apicultor_id] += e.kilos_neto;
+      }
+    });
+    
+    // Filtrar productores activos y ordenar por volumen descendente
+    const apicultoresActivos = apicultores.filter(a => (a.etapa || 'ACTIVO') === 'ACTIVO');
+    const apicultoresOrdenados = [...apicultoresActivos].sort((a, b) => {
+      const kilosA = kilosPorApicultor[a.id] || 0;
+      const kilosB = kilosPorApicultor[b.id] || 0;
+      return kilosB - kilosA;
+    });
+    
+    const totalMielFisica = apicultoresOrdenados.reduce((acc, a) => acc + (kilosPorApicultor[a.id] || 0), 0);
+    
+    let acumulado = 0;
+    const idsClaseA = new Set<string>();
+    
+    for (const a of apicultoresOrdenados) {
+      const kilos = kilosPorApicultor[a.id] || 0;
+      if (kilos === 0) continue;
+      
+      // Si el acumulado es menor al 80% o es el primer productor
+      if (acumulado < totalMielFisica * 0.8 || idsClaseA.size === 0) {
+        idsClaseA.add(a.id);
+        acumulado += kilos;
+      } else {
+        break;
+      }
+    }
+    
+    const mapaCategorias: { [id: string]: { categoria: 'A' | 'B'; kilos: number; porcentaje: number } } = {};
+    apicultores.forEach(a => {
+      const kilos = kilosPorApicultor[a.id] || 0;
+      const pct = totalMielFisica > 0 ? (kilos / totalMielFisica) * 100 : 0;
+      const esClaseA = idsClaseA.has(a.id);
+      mapaCategorias[a.id] = {
+        categoria: esClaseA ? 'A' : 'B',
+        kilos,
+        porcentaje: pct
+      };
+    });
+    
+    return {
+      mapaCategorias,
+      totalMielFisica,
+      vipCount: idsClaseA.size
+    };
+  }, [apicultores, entregas]);
 
   // Acciones de inserción
   const handleCreateApicultor = async (e: React.FormEvent) => {
@@ -274,6 +349,20 @@ function App() {
       cargarApicultores();
     } catch (err) {
       alert('Error creando apicultor: ' + err);
+    }
+  };
+
+  const handleSincronizarSharepoint = async () => {
+    setIsSyncingSharepoint(true);
+    setSyncMessage(null);
+    try {
+      const res = await srmService.sincronizarTamboresSharepoint();
+      setSyncMessage(res.message);
+      await cargarApicultores();
+    } catch (err) {
+      setSyncMessage("Error de conexión: No se pudo conectar a la API de SharePoint.");
+    } finally {
+      setIsSyncingSharepoint(false);
     }
   };
 
@@ -802,17 +891,13 @@ function App() {
     
     if (filtroAlerta) {
       const tieneIncidencia = globalStats.incidencias.some(inc => inc.apicultor_nombre === a.nombre);
-      const bajoRating = a.puntuacion < 4.5;
-      const tieneEnvases = getSaldoEnvases(a.id) > 0;
-      return tieneIncidencia || bajoRating || tieneEnvases;
+      const tieneEnvases = getSaldoEnvases(a.id) > 100; // Alerta si tiene saldo muy alto de envases
+      return tieneIncidencia || tieneEnvases;
     }
     
     return true;
   });
 
-  const avgRating = apicultores.length > 0
-    ? (apicultores.reduce((acc, curr) => acc + curr.puntuacion, 0) / apicultores.length).toFixed(2)
-    : '5.00';
   const totalLocalidades = new Set(apicultores.map(a => a.localidad).filter(Boolean)).size;
   const totalPages = Math.ceil(apicultoresFiltrados.length / itemsPerPage);
   const apicultoresPaginados = apicultoresFiltrados.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -831,16 +916,16 @@ function App() {
           ------------------------------------------------------------------- */}
       <aside className={`sidebar-premium ${mobileMenuOpen ? 'open' : ''}`}>
         <div>
-          {/* Logo y Encabezado de GEO-SRM */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '2.5rem', padding: '0.25rem 0.5rem' }}>
-            <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--primary)', letterSpacing: '0.05em', fontFamily: 'var(--font-title)' }}>
-              GEO-SRM
-            </div>
+          {/* Logo y Encabezado de SRM */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '2.5rem', padding: '0.25rem 0.5rem' }}>
             <img 
-              src="/logo-geomiel.png?v=3" 
+              src="/logo-geomiel.png?v=4" 
               alt="GeoMiel Logo" 
-              style={{ height: '42px', width: 'auto', objectFit: 'contain', alignSelf: 'flex-start', marginTop: '-0.2rem' }} 
+              style={{ height: '36px', width: 'auto', objectFit: 'contain' }} 
             />
+            <span style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--primary)', letterSpacing: '0.05em', fontFamily: 'var(--font-title)' }}>
+              SRM
+            </span>
           </div>
 
           {/* Menú de Navegación */}
@@ -1301,9 +1386,7 @@ function App() {
                       backgroundColor: 'var(--secondary)',
                       color: '#FFFFFF',
                       borderRadius: '8px',
-                      fontWeight: 700,
-                      fontSize: '0.85rem',
-                      textAlign: 'center',
+                                          textAlign: 'center',
                       cursor: 'pointer',
                       border: 'none',
                       transition: 'all 0.15s ease'
@@ -1313,41 +1396,103 @@ function App() {
                   </button>
                 </div>
 
-                {/* Distribución por Tipo de Floración */}
-                <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                {/* Sincronización SharePoint (TCM) */}
+                <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '320px' }}>
                   <div>
-                    <h3 className="font-title" style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-title)', marginBottom: '0.5rem' }}>Distribución por Floración</h3>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Porcentaje del stock de miel física en depósito según la floración registrada.</p>
-                  </div>
-                  
-                  <div className="donut-chart-wrapper">
-                    <div style={{ position: 'relative', width: '120px', height: '120px', flexShrink: 0 }}>
-                      <svg width="120" height="120" viewBox="0 0 42 42" className="donut">
-                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#EFEDED" strokeWidth="4.5"></circle>
-                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--secondary)" strokeWidth="4.5" strokeDasharray="90 10" strokeDashoffset="25"></circle>
-                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--primary)" strokeWidth="4.5" strokeDasharray="10 90" strokeDashoffset="35"></circle>
-                      </svg>
-                      <div style={{
-                        position: 'absolute',
-                        top: 0, left: 0, right: 0, bottom: 0,
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                        lineHeight: 1
-                      }}>
-                        <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)' }}>{(globalStats.totalKilosMiel / 1000).toFixed(0)}k</span>
-                        <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', fontWeight: 700, marginTop: '2px' }}>KILOS</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <span className="badge badge-info" style={{ fontSize: '0.65rem' }}>Integración Externa</span>
+                        <h3 className="font-title" style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-title)', marginTop: '0.25rem', marginBottom: '0.5rem' }}>
+                          Sincronización SharePoint (TCM)
+                        </h3>
+                      </div>
+                      <span className="material-symbols-outlined" style={{ color: 'var(--primary)', opacity: 0.7 }}>cloud_sync</span>
+                    </div>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.4, marginBottom: '0.75rem' }}>
+                      Sincroniza el listado de Tambores con Miel (TCM) y sus especificaciones directamente desde el archivo Excel en SharePoint.
+                    </p>
+                    
+                    <div style={{
+                      backgroundColor: 'rgba(8,32,26,0.03)',
+                      padding: '0.6rem 0.75rem',
+                      borderRadius: '8px',
+                      fontSize: '0.75rem',
+                      lineHeight: 1.4,
+                      color: 'var(--text-body)',
+                      marginBottom: '1rem'
+                    }}>
+                      <strong style={{ display: 'block', marginBottom: '0.25rem', color: 'var(--primary)' }}>Campos del Excel sincronizados:</strong>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem 0.5rem' }}>
+                        <div>• ID del Tambor</div>
+                        <div>• Fecha de Depósito</div>
+                        <div>• Apicultor Asignado</div>
+                        <div>• Peso Bruto / Tara</div>
+                        <div>• Peso Neto Real</div>
+                        <div>• Código de SENASA</div>
+                        <div>• Color (mm Pfund)</div>
+                        <div>• Humedad / HMF</div>
                       </div>
                     </div>
 
-                    <div className="donut-chart-legend">
-                      <div className="donut-legend-item">
-                        <span><span className="donut-legend-color" style={{ backgroundColor: 'var(--secondary)' }}></span>Multiflora / Pradera</span>
-                        <strong className="font-mono">90%</strong>
-                      </div>
-                      <div className="donut-legend-item">
-                        <span><span className="donut-legend-color" style={{ backgroundColor: 'var(--primary)' }}></span>Eucalipto</span>
-                        <strong className="font-mono">10%</strong>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                      <strong style={{ color: 'var(--text-title)' }}>Arquitectura del Enlace:</strong>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.25rem' }}>
+                        <div><strong>Opción 1:</strong> Webhook de Power Automate en SharePoint directo a Supabase.</div>
+                        <div><strong>Opción 2:</strong> Script programado de sincronización vía Graph API.</div>
                       </div>
                     </div>
+                  </div>
+
+                  <div>
+                    {syncMessage && (
+                      <div style={{
+                        padding: '0.65rem',
+                        backgroundColor: syncMessage.includes('Error') ? '#FFE5E5' : '#E8F5E9',
+                        color: syncMessage.includes('Error') ? '#C62828' : '#2E7D32',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        marginBottom: '0.75rem',
+                        lineHeight: 1.3
+                      }}>
+                        {syncMessage}
+                      </div>
+                    )}
+
+                    <button 
+                      onClick={handleSincronizarSharepoint}
+                      disabled={isSyncingSharepoint}
+                      className="font-title"
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        backgroundColor: isSyncingSharepoint ? '#ECEAE9' : 'var(--primary)',
+                        color: isSyncingSharepoint ? 'var(--text-secondary)' : '#FFFFFF',
+                        borderRadius: '8px',
+                        fontWeight: 700,
+                        fontSize: '0.85rem',
+                        textAlign: 'center',
+                        cursor: isSyncingSharepoint ? 'not-allowed' : 'pointer',
+                        border: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.5rem',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {isSyncingSharepoint ? (
+                        <>
+                          <span className="material-symbols-outlined" style={{ animation: 'spin 1.5s linear infinite', fontSize: '18px' }}>autorenew</span>
+                          Sincronizando Excel...
+                        </>
+                      ) : (
+                        <>
+                          <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>sync</span>
+                          Sincronizar ahora con SharePoint
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
 
@@ -1614,12 +1759,18 @@ function App() {
                   backgroundColor: 'rgba(125, 87, 0, 0.08)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--secondary)'
                 }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>star</span>
+                  <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>military_tech</span>
                 </div>
                 <div>
-                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Rating Promedio</span>
-                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>{avgRating}</span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Desempeño general de red</span>
+                  <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Socios VIP (Clase A)</span>
+                  <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
+                    {apicultoresCategorizados.vipCount}
+                  </span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                    {apicultores.filter(a => (a.etapa || 'ACTIVO') === 'ACTIVO').length > 0
+                      ? `${((apicultoresCategorizados.vipCount / apicultores.filter(a => (a.etapa || 'ACTIVO') === 'ACTIVO').length) * 100).toFixed(0)}% del total`
+                      : '0% del total'}
+                  </span>
                 </div>
               </div>
 
@@ -1734,8 +1885,7 @@ function App() {
                       <th className="font-title">Apicultor</th>
                       <th className="font-title">Identificación (CUIT)</th>
                       <th className="font-title">Ubicación</th>
-                      <th className="font-title">Apiarios</th>
-                      <th className="font-title">Rating</th>
+                      <th className="font-title">Categoría 80/20</th>
                       <th className="font-title">Estado</th>
                       <th className="font-title text-right">Acción</th>
                     </tr>
@@ -1743,20 +1893,17 @@ function App() {
                   <tbody>
                     {apicultoresFiltrados.length === 0 ? (
                       <tr>
-                        <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2.5rem' }}>
+                        <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2.5rem' }}>
                           No se encontraron apicultores registrados.
                         </td>
                       </tr>
                     ) : (
                       apicultoresPaginados.map((a) => {
                         const tieneIncidencia = globalStats.incidencias.some(inc => inc.apicultor_nombre === a.nombre);
-                        const apiariosCount = Math.floor((a.nombre.length * 7) % 15) + 3; // Mock apiarios count
                         
                         let estadoBadge = <span className="badge badge-success">Activo</span>;
-                        if (tieneIncidencia || a.puntuacion < 4.5) {
-                          estadoBadge = <span className="badge badge-danger">En Revisión</span>;
-                        } else if (a.puntuacion < 3.8) {
-                          estadoBadge = <span className="badge badge-danger">Inactivo</span>;
+                        if (tieneIncidencia) {
+                          estadoBadge = <span className="badge badge-danger">En Alerta</span>;
                         }
 
                         return (
@@ -1781,16 +1928,18 @@ function App() {
                             <td className="font-mono">{a.cuit}</td>
                             <td>{a.localidad ? `${a.localidad}, ${a.provincia || 'Ubicación'}` : 'No declarada'}</td>
                             <td>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--text-secondary)' }}>hive</span>
-                                <strong className="font-mono">{apiariosCount}</strong>
-                              </div>
-                            </td>
-                            <td>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                <span className="material-symbols-outlined" style={{ color: 'var(--secondary)', fontSize: '18px' }}>star</span>
-                                <span className="font-mono" style={{ fontWeight: 700 }}>{a.puntuacion.toFixed(1)}</span>
-                              </div>
+                              {(() => {
+                                const catInfo = apicultoresCategorizados.mapaCategorias[a.id] || { categoria: 'B', kilos: 0, porcentaje: 0 };
+                                return catInfo.categoria === 'A' ? (
+                                  <span className="badge badge-success" style={{ backgroundColor: '#D4AF37', color: '#FFFFFF', fontWeight: 800, border: 'none' }}>
+                                    Clase A (VIP)
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-info" style={{ backgroundColor: '#A0A0A0', color: '#FFFFFF', border: 'none' }}>
+                                    Clase B
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td>{estadoBadge}</td>
                             <td style={{ textAlign: 'right' }}>
@@ -2180,7 +2329,7 @@ function App() {
 
             <div className="ficha-grid">
               
-              {/* Columna Izquierda: Perfil y Apiarios */}
+              {/* Columna Izquierda: Perfil y Análisis de Pareto 80/20 */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                 
                 {/* Perfil del Apicultor */}
@@ -2248,76 +2397,75 @@ function App() {
                   </div>
                 </div>
 
-                {/* Mapa de Distribución de Apiarios */}
-                <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span className="label-caps" style={{ fontSize: '0.65rem' }}>Distribución de Apiarios</span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Uruguay / G. Pico</span>
-                  </div>
+                {/* Aporte al Volumen (Pareto 80/20) */}
+                {(() => {
+                  const catInfo = apicultoresCategorizados.mapaCategorias[apicultorSeleccionado.id] || { categoria: 'B', kilos: 0, porcentaje: 0 };
+                  const esVIP = catInfo.categoria === 'A';
                   
-                  {/* Contenedor Gráfico del Mapa */}
-                  <div style={{
-                    width: '100%',
-                    height: '220px',
-                    borderRadius: '12px',
-                    backgroundColor: '#1E352F',
-                    position: 'relative',
-                    overflow: 'hidden',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}>
-                    {/* SVG Map Lines */}
-                    <svg width="100%" height="100%" style={{ position: 'absolute', opacity: 0.15 }}>
-                      <path d="M20,10 Q60,40 100,20 T180,80 T260,110 T300,220" fill="none" stroke="#FFFFFF" strokeWidth="2" />
-                      <path d="M10,90 Q80,120 150,140 T220,170 T320,190" fill="none" stroke="#FFFFFF" strokeWidth="2.5" />
-                    </svg>
-                    
-                    {/* Dots representing apiarios */}
-                    {[
-                      { t: '15%', l: '30%' },
-                      { t: '25%', l: '60%' },
-                      { t: '35%', l: '20%' },
-                      { t: '40%', l: '45%' },
-                      { t: '50%', l: '75%' },
-                      { t: '65%', l: '35%' },
-                      { t: '75%', l: '65%' },
-                      { t: '80%', l: '50%' },
-                      { t: '20%', l: '85%' },
-                      { t: '60%', l: '15%' }
-                    ].map((dot, idx) => (
-                      <div 
-                        key={idx}
-                        style={{
-                          position: 'absolute',
-                          top: dot.t,
-                          left: dot.l,
-                          width: '10px',
-                          height: '10px',
-                          borderRadius: '50%',
-                          backgroundColor: 'var(--secondary-container)',
-                          border: '2px solid #FFFFFF',
-                          boxShadow: '0 0 8px var(--secondary-container)',
-                          cursor: 'pointer'
-                        }}
-                        title={`Apiario #${idx + 1}`}
-                      />
-                    ))}
-                    
-                    <div style={{
-                      position: 'absolute',
-                      bottom: '12px',
-                      left: '12px',
-                      backgroundColor: 'rgba(8, 32, 26, 0.85)',
-                      backdropFilter: 'blur(4px)',
-                      padding: '4px 8px',
-                      borderRadius: '6px',
-                      border: '1px solid rgba(255,255,255,0.1)'
-                    }}>
-                      <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#FFFFFF' }}>Total Apiarios: 12</span>
+                  return (
+                    <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', borderLeft: esVIP ? '4px solid #D4AF37' : '4px solid #A0A0A0' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className="label-caps" style={{ fontSize: '0.65rem' }}>Análisis de Pareto 80/20</span>
+                        <span className="badge font-mono" style={{
+                          backgroundColor: esVIP ? 'rgba(212,175,55,0.1)' : 'rgba(160,160,160,0.1)',
+                          color: esVIP ? '#D4AF37' : '#707070',
+                          fontWeight: 800,
+                          fontSize: '0.75rem',
+                          border: 'none'
+                        }}>
+                          {esVIP ? 'Socio VIP - Clase A' : 'Socio Estándar - Clase B'}
+                        </span>
+                      </div>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Miel Física Entregada:</span>
+                          <strong style={{ color: 'var(--text-title)' }} className="font-mono">{catInfo.kilos.toLocaleString('es-AR')} kg</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Participación en Acopio:</span>
+                          <strong style={{ color: 'var(--text-title)' }} className="font-mono">{catInfo.porcentaje.toFixed(2)}%</strong>
+                        </div>
+                      </div>
+
+                      {/* Visual Progress Gauge */}
+                      <div style={{ marginTop: '0.25rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                          <span>Aporte de Miel</span>
+                          <span>{catInfo.porcentaje.toFixed(1)}% del Total</span>
+                        </div>
+                        <div style={{ width: '100%', height: '8px', backgroundColor: '#EFEDED', borderRadius: '4px', overflow: 'hidden' }}>
+                          <div style={{
+                            width: `${Math.min(100, Math.max(5, catInfo.porcentaje * 4))}%`,
+                            height: '100%',
+                            backgroundColor: esVIP ? '#D4AF37' : 'var(--primary)',
+                            borderRadius: '4px'
+                          }} />
+                        </div>
+                      </div>
+
+                      <div style={{
+                        marginTop: '0.5rem',
+                        padding: '0.75rem',
+                        borderRadius: '8px',
+                        backgroundColor: esVIP ? 'rgba(212,175,55,0.05)' : 'rgba(8,32,26,0.02)',
+                        fontSize: '0.8rem',
+                        lineHeight: 1.4,
+                        color: 'var(--text-secondary)'
+                      }}>
+                        {esVIP ? (
+                          <>
+                            🌟 <strong>Recomendación Comercial (VIP):</strong> Este productor es clave para el volumen de acopio de la empresa (aporta al 80% principal). Se recomienda priorizar sus pagos, envases vacíos y mantener comunicación fluida.
+                          </>
+                        ) : (
+                          <>
+                            📦 <strong>Recomendación Comercial (Estándar):</strong> Productor complementario (aporta al 20% secundario del volumen). Brindar la calidad de servicio estándar y fomentar mayor volumen en próximas cosechas.
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
               </div>
 
@@ -2565,8 +2713,13 @@ function App() {
                           <p className="font-mono" style={{ fontWeight: 700, textTransform: 'uppercase' }}>{apicultorSeleccionado.renapa || '-'}</p>
                         </div>
                         <div>
-                          <label className="label-caps">Rating de Proveedor</label>
-                          <p className="font-mono" style={{ fontWeight: 700 }}>{apicultorSeleccionado.puntuacion.toFixed(1)} / 5.0</p>
+                          <label className="label-caps">Categorización 80/20</label>
+                          <p className="font-mono" style={{ fontWeight: 700 }}>
+                            {(() => {
+                              const catInfo = apicultoresCategorizados.mapaCategorias[apicultorSeleccionado.id] || { categoria: 'B' };
+                              return catInfo.categoria === 'A' ? 'Clase A (Socio VIP)' : 'Clase B (Estándar)';
+                            })()}
+                          </p>
                         </div>
                       </div>
                     )}
@@ -2767,7 +2920,14 @@ function App() {
                       type="text" required
                       style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}
                       value={newApicultorForm.cuit}
-                      onChange={e => setNewApicultorForm({ ...newApicultorForm, cuit: e.target.value })}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setNewApicultorForm(prev => ({
+                          ...prev,
+                          cuit: val,
+                          dni: extraerDniDeCuit(val) || prev.dni
+                        }));
+                      }}
                     />
                     <button
                       type="button"
@@ -2780,7 +2940,8 @@ function App() {
                           nombre: vals.nombre || prev.nombre,
                           renapa: vals.renapa || prev.renapa,
                           provincia: vals.provincia || prev.provincia,
-                          localidad: vals.localidad || prev.localidad
+                          localidad: vals.localidad || prev.localidad,
+                          dni: extraerDniDeCuit(newApicultorForm.cuit) || prev.dni
                         }))
                       )}
                       style={{
@@ -2800,12 +2961,63 @@ function App() {
                       🔍 Verificar
                     </button>
                   </div>
+
+                  {/* Buscador de CUIT por Nombre/Apellido */}
+                  <div style={{ marginTop: '0.5rem', backgroundColor: 'rgba(8,32,26,0.03)', padding: '0.5rem', borderRadius: '6px', border: '1px dashed var(--border-color)' }}>
+                    <label style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem', textTransform: 'uppercase' }}>
+                      ¿No conoces el CUIT? Buscar por Nombre
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="Escribe el nombre del apicultor..."
+                      style={{ width: '100%', padding: '0.35rem', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid var(--border-color)' }}
+                      value={nombreSearchQuery}
+                      onChange={e => setNombreSearchQuery(e.target.value)}
+                    />
+                    {nombreSearchQuery.trim() !== '' && (
+                      <div style={{ maxHeight: '110px', overflowY: 'auto', marginTop: '0.25rem', backgroundColor: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: '4px' }}>
+                        {apicultores
+                          .filter(a => a.nombre.toLowerCase().includes(nombreSearchQuery.toLowerCase()))
+                          .map(a => (
+                            <div 
+                              key={a.id} 
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #F0F0F0', cursor: 'pointer' }}
+                              onClick={() => {
+                                setNewApicultorForm(prev => ({
+                                  ...prev,
+                                  cuit: a.cuit,
+                                  dni: extraerDniDeCuit(a.cuit) || a.dni || '',
+                                  nombre: a.nombre,
+                                  localidad: a.localidad || prev.localidad,
+                                  provincia: a.provincia || prev.provincia,
+                                  renapa: a.renapa || prev.renapa,
+                                  telefono: a.telefono || prev.telefono
+                                }));
+                                setNombreSearchQuery('');
+                              }}
+                            >
+                              <div>
+                                <strong>{a.nombre}</strong>
+                                <span style={{ color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>{a.cuit}</span>
+                              </div>
+                              <span style={{ color: 'var(--secondary)', fontWeight: 700, fontSize: '0.65rem' }}>Copiar</span>
+                            </div>
+                          ))
+                        }
+                        {apicultores.filter(a => a.nombre.toLowerCase().includes(nombreSearchQuery.toLowerCase())).length === 0 && (
+                          <div style={{ padding: '0.35rem', fontSize: '0.7rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                            Sin coincidencias.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>DNI</label>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>DNI (Generado automáticamente)</label>
                   <input 
                     type="text"
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FAF9F8' }}
                     value={newApicultorForm.dni}
                     onChange={e => setNewApicultorForm({ ...newApicultorForm, dni: e.target.value })}
                   />
@@ -3559,7 +3771,14 @@ function App() {
                       type="text" required
                       style={{ flex: 1, padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}
                       value={quickEditForm.cuit}
-                      onChange={e => setQuickEditForm({ ...quickEditForm, cuit: e.target.value })}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setQuickEditForm(prev => ({
+                          ...prev,
+                          cuit: val,
+                          dni: extraerDniDeCuit(val) || prev.dni
+                        }));
+                      }}
                     />
                     <button
                       type="button"
@@ -3572,7 +3791,8 @@ function App() {
                           nombre: vals.nombre || prev.nombre,
                           renapa: vals.renapa || prev.renapa,
                           provincia: vals.provincia || prev.provincia,
-                          localidad: vals.localidad || prev.localidad
+                          localidad: vals.localidad || prev.localidad,
+                          dni: extraerDniDeCuit(quickEditForm.cuit) || prev.dni
                         }))
                       )}
                       style={{
@@ -3592,12 +3812,63 @@ function App() {
                       🔍 Verificar
                     </button>
                   </div>
+
+                  {/* Buscador de CUIT por Nombre/Apellido */}
+                  <div style={{ marginTop: '0.5rem', backgroundColor: 'rgba(8,32,26,0.03)', padding: '0.5rem', borderRadius: '6px', border: '1px dashed var(--border-color)' }}>
+                    <label style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem', textTransform: 'uppercase' }}>
+                      ¿No conoces el CUIT? Buscar por Nombre
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="Escribe el nombre del apicultor..."
+                      style={{ width: '100%', padding: '0.35rem', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid var(--border-color)' }}
+                      value={nombreSearchQuery}
+                      onChange={e => setNombreSearchQuery(e.target.value)}
+                    />
+                    {nombreSearchQuery.trim() !== '' && (
+                      <div style={{ maxHeight: '110px', overflowY: 'auto', marginTop: '0.25rem', backgroundColor: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: '4px' }}>
+                        {apicultores
+                          .filter(a => a.nombre.toLowerCase().includes(nombreSearchQuery.toLowerCase()))
+                          .map(a => (
+                            <div 
+                              key={a.id} 
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #F0F0F0', cursor: 'pointer' }}
+                              onClick={() => {
+                                setQuickEditForm(prev => ({
+                                  ...prev,
+                                  cuit: a.cuit,
+                                  dni: extraerDniDeCuit(a.cuit) || a.dni || '',
+                                  nombre: a.nombre,
+                                  localidad: a.localidad || prev.localidad,
+                                  provincia: a.provincia || prev.provincia,
+                                  renapa: a.renapa || prev.renapa,
+                                  telefono: a.telefono || prev.telefono
+                                }));
+                                setNombreSearchQuery('');
+                              }}
+                            >
+                              <div>
+                                <strong>{a.nombre}</strong>
+                                <span style={{ color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>{a.cuit}</span>
+                              </div>
+                              <span style={{ color: 'var(--secondary)', fontWeight: 700, fontSize: '0.65rem' }}>Copiar</span>
+                            </div>
+                          ))
+                        }
+                        {apicultores.filter(a => a.nombre.toLowerCase().includes(nombreSearchQuery.toLowerCase())).length === 0 && (
+                          <div style={{ padding: '0.35rem', fontSize: '0.7rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                            Sin coincidencias.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>DNI</label>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>DNI (Generado automáticamente)</label>
                   <input 
                     type="text"
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FAF9F8' }}
                     value={quickEditForm.dni}
                     onChange={e => setQuickEditForm({ ...quickEditForm, dni: e.target.value })}
                   />
