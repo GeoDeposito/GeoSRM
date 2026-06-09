@@ -838,7 +838,7 @@ function App() {
               GEO-SRM
             </div>
             <img 
-              src="/logo-geomiel.png" 
+              src="/logo-geomiel.png?v=3" 
               alt="GeoMiel Logo" 
               style={{ height: '42px', width: 'auto', objectFit: 'contain', alignSelf: 'flex-start', marginTop: '-0.2rem' }} 
             />
@@ -1407,45 +1407,60 @@ function App() {
 
             </div>
 
-            {/* Columna Lateral Derecha (Sidebar Ejecutivo) */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              
-              {/* Proyección e Información de Acopio */}
-              <div className="card-premium" style={{
-                backgroundColor: 'var(--primary-container)',
-                color: '#FFFFFF',
-                border: 'none',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '1rem',
-                backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'28\' height=\'49\' viewBox=\'0 0 28 49\'%3E%3Cpath fill=\'%23ffffff\' fill-opacity=\'0.03\' d=\'M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.91v12.18l10.99 6.34 11-6.34V17.91l-11-6.34L3 17.91z\'/%3E%3C/svg%3E")'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <TrendingUp size={20} style={{ color: 'var(--secondary-container)' }} />
-                  <span className="label-caps" style={{ color: 'var(--secondary-container)', fontSize: '0.65rem' }}>Acopio General</span>
+              {/* Resumen del Embudo de Incorporación */}
+              <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+                  <Trello size={18} style={{ color: 'var(--secondary)' }} />
+                  <h4 className="font-title" style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-title)' }}>Embudo de Incorporación</h4>
                 </div>
-                <h3 className="font-title" style={{ fontSize: '1.4rem', fontWeight: 800, lineHeight: 1.2 }}>
-                  Perspectiva de Cosecha 2026
-                </h3>
-                <p style={{ fontSize: '0.85rem', color: '#B3C4BF', lineHeight: 1.4 }}>
-                  Se proyecta un incremento del 15% en el volumen de acopio de miel multiflora debido a condiciones climáticas favorables en la zona de General Pico y La Pampa.
-                </p>
+                
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>Proporción de proveedores en el proceso de alta comercial.</p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {[
+                    { label: 'Prospectos (Leads)', key: 'PROSPECTO', color: '#9E9E9E' },
+                    { label: 'Contactados', key: 'CONTACTADO', color: '#2196F3' },
+                    { label: 'Negociando', key: 'NEGOCIANDO', color: '#FF9800' },
+                    { label: 'Proveedores Activos', key: 'ACTIVO', color: '#4CAF50' }
+                  ].map(item => {
+                    const count = apicultores.filter(a => (a.etapa || 'ACTIVO') === item.key).length;
+                    const percent = apicultores.length > 0 ? (count / apicultores.length) * 100 : 0;
+                    return (
+                      <div key={item.key} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', fontWeight: 600 }}>
+                          <span style={{ color: 'var(--text-body)' }}>{item.label}</span>
+                          <span style={{ color: 'var(--text-title)', fontWeight: 700 }}>{count} ({percent.toFixed(0)}%)</span>
+                        </div>
+                        <div style={{ width: '100%', height: '6px', backgroundColor: '#ECEAE9', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div style={{ width: `${percent}%`, height: '100%', backgroundColor: item.color, borderRadius: '3px' }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
                 <button 
-                  onClick={() => alert('Descargando Guía de Calidad Geomiel.')}
+                  onClick={() => setView('embudo')}
+                  className="font-title"
                   style={{
-                    backgroundColor: 'var(--secondary-container)',
+                    backgroundColor: 'rgba(8, 32, 26, 0.05)',
                     color: 'var(--primary)',
-                    padding: '0.75rem 1rem',
-                    borderRadius: '10px',
+                    padding: '0.5rem',
+                    borderRadius: '8px',
                     fontWeight: 700,
-                    fontSize: '0.85rem',
+                    fontSize: '0.8rem',
                     textAlign: 'center',
-                    marginTop: '0.5rem',
                     border: 'none',
-                    cursor: 'pointer'
+                    cursor: 'pointer',
+                    width: '100%',
+                    marginTop: '0.25rem',
+                    transition: 'all 0.15s ease'
                   }}
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(8, 32, 26, 0.1)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(8, 32, 26, 0.05)'; }}
                 >
-                  Guía de Buenas Prácticas Apícolas
+                  Ir al Tablero Kanban
                 </button>
               </div>
 
@@ -1499,34 +1514,53 @@ function App() {
                     fontSize: '0.8rem',
                     lineHeight: 1.4
                   }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: '24px', color: '#059669', marginBottom: '0.25rem', display: 'block' }}>check_circle</span>
+                    <span style={{ fontSize: '24px', color: '#059669', marginBottom: '0.25rem', display: 'block' }}>✓</span>
                     <strong>Todo en Orden</strong>
-                    <p style={{ marginTop: '0.25rem', color: '#047857' }}>
+                    <p style={{ marginTop: '0.25rem', color: '#047857', margin: 0 }}>
                       No se registran alertas de calidad de miel. Todas las entregas cumplen con Humedad &lt; 18.0% y HMF &lt; 40.0 mg/kg.
                     </p>
                   </div>
                 )}
               </div>
 
-              {/* Directrices de Calidad y Acopio */}
+              {/* Últimas Entregas de Miel (Resumen) */}
               <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <h4 className="font-title" style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-title)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-                  Directrices de Calidad y Acopio
-                </h4>
-                <ul style={{
-                  paddingLeft: '1.25rem',
-                  fontSize: '0.8rem',
-                  color: 'var(--text-secondary)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.5rem',
-                  lineHeight: 1.4
-                }}>
-                  <li>Límite de humedad máximo permitido: 18.0%.</li>
-                  <li>Límite de HMF (Hidroximetilfurfural) máximo permitido: 40.0 mg/kg.</li>
-                  <li>Control estricto de residuos y antibióticos por lote de tambores antes de exportación.</li>
-                  <li>Los envases prestados deben devolverse en un plazo máximo de 180 días.</li>
-                </ul>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+                  <Truck size={18} style={{ color: 'var(--primary)' }} />
+                  <h4 className="font-title" style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-title)' }}>Últimos Lotes Recibidos</h4>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {[
+                    { fecha: '03/05/2026', apicultor: 'Ruiz Rubén Oscar', tambores: 18, kilos: 5364.5 },
+                    { fecha: '28/04/2026', apicultor: 'Ruiz Rubén Oscar', tambores: 22, kilos: 6542.0 },
+                    { fecha: '15/04/2026', apicultor: 'Ruiz Rubén Oscar', tambores: 15, kilos: 4462.5 },
+                    { fecha: '02/04/2026', apicultor: 'Ruiz Rubén Oscar', tambores: 20, kilos: 5980.0 }
+                  ].map((ent, idx) => (
+                    <div 
+                      key={idx} 
+                      style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center', 
+                        padding: '0.5rem', 
+                        borderRadius: '6px', 
+                        border: '1px solid var(--border-color)', 
+                        backgroundColor: '#FAFBFD' 
+                      }}
+                    >
+                      <div>
+                        <strong style={{ fontSize: '0.75rem', color: 'var(--text-title)', display: 'block' }}>{ent.apicultor}</strong>
+                        <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
+                          {ent.fecha} · {ent.tambores} tambores
+                        </span>
+                      </div>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)', fontFamily: 'var(--font-mono)' }}>
+                        {ent.kilos.toLocaleString('es-AR')} kg
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
 
             </div>
