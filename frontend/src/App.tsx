@@ -84,6 +84,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [nombreSearchQuery, setNombreSearchQuery] = useState('');
   const [paretoSearchQuery, setParetoSearchQuery] = useState('');
+  const [mostrarSimulacionPareto, setMostrarSimulacionPareto] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [isImportingExcel, setIsImportingExcel] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
@@ -309,12 +310,30 @@ function App() {
       kilosPorApicultor[a.id] = 0;
     });
     
-    // Sumar entregas
-    entregas.forEach(e => {
-      if (kilosPorApicultor[e.apicultor_id] !== undefined) {
-        kilosPorApicultor[e.apicultor_id] += e.kilos_neto;
-      }
-    });
+    if (mostrarSimulacionPareto) {
+      // Generar volúmenes deterministas que sigan una distribución Pareto
+      // Para dar un ejemplo hermoso del 80/20 con los apicultores de base
+      apicultores.forEach((a, idx) => {
+        if (idx === 0) kilosPorApicultor[a.id] = 16250;
+        else if (idx === 1) kilosPorApicultor[a.id] = 12900;
+        else if (idx === 2) kilosPorApicultor[a.id] = 9800;
+        else if (idx === 3) kilosPorApicultor[a.id] = 8500;
+        else if (idx === 4) kilosPorApicultor[a.id] = 7300;
+        else if (idx === 5) kilosPorApicultor[a.id] = 6100;
+        else if (idx === 6) kilosPorApicultor[a.id] = 5400;
+        else if (idx === 7) kilosPorApicultor[a.id] = 4800;
+        else if (idx < 15) kilosPorApicultor[a.id] = 1800 - (idx * 50);
+        else if (idx < 35) kilosPorApicultor[a.id] = 450 - (idx * 5);
+        else kilosPorApicultor[a.id] = 0;
+      });
+    } else {
+      // Sumar entregas reales
+      entregas.forEach(e => {
+        if (kilosPorApicultor[e.apicultor_id] !== undefined) {
+          kilosPorApicultor[e.apicultor_id] += e.kilos_neto;
+        }
+      });
+    }
     
     // Filtrar productores activos y ordenar por volumen descendente
     const apicultoresActivos = apicultores.filter(a => (a.etapa || 'ACTIVO') === 'ACTIVO');
@@ -357,9 +376,10 @@ function App() {
     return {
       mapaCategorias,
       totalMielFisica,
-      vipCount: idsClaseA.size
+      vipCount: idsClaseA.size,
+      idsClaseA
     };
-  }, [apicultores, entregas]);
+  }, [apicultores, entregas, mostrarSimulacionPareto]);
 
   // Acciones de inserción
   const handleCreateApicultor = async (e: React.FormEvent) => {
@@ -3290,45 +3310,17 @@ function App() {
         )}
 
         {view === 'pareto' && (() => {
-          // Filtrar productores activos
+          const { mapaCategorias, totalMielFisica, vipCount, idsClaseA } = apicultoresCategorizados;
           const apicultoresActivos = apicultores.filter(a => (a.etapa || 'ACTIVO') === 'ACTIVO');
           
-          // Calcular volumen total y por apicultor
-          const kilosPorApicultor: { [apicultorId: string]: number } = {};
-          apicultores.forEach(a => {
-            kilosPorApicultor[a.id] = 0;
-          });
-          entregas.forEach(e => {
-            if (kilosPorApicultor[e.apicultor_id] !== undefined) {
-              kilosPorApicultor[e.apicultor_id] += e.kilos_neto;
-            }
-          });
-
           // Ordenar productores activos de mayor a menor volumen
           const apicultoresOrdenados = [...apicultoresActivos].sort((a, b) => {
-            const kilosA = kilosPorApicultor[a.id] || 0;
-            const kilosB = kilosPorApicultor[b.id] || 0;
+            const kilosA = mapaCategorias[a.id]?.kilos || 0;
+            const kilosB = mapaCategorias[b.id]?.kilos || 0;
             return kilosB - kilosA;
           });
 
-          const totalMielFisica = apicultoresOrdenados.reduce((acc, a) => acc + (kilosPorApicultor[a.id] || 0), 0);
-
-          // Identificar Clase A (primeros productores que sumados llegan al 80%)
-          let acumulado = 0;
-          const idsClaseA = new Set<string>();
-          for (const a of apicultoresOrdenados) {
-            const kilos = kilosPorApicultor[a.id] || 0;
-            if (kilos === 0) continue;
-            if (acumulado < totalMielFisica * 0.8 || idsClaseA.size === 0) {
-              idsClaseA.add(a.id);
-              acumulado += kilos;
-            } else {
-              break;
-            }
-          }
-
-          const vipCount = idsClaseA.size;
-          const totalProducersWithVolume = apicultoresOrdenados.filter(a => (kilosPorApicultor[a.id] || 0) > 0).length;
+          const totalProducersWithVolume = apicultoresOrdenados.filter(a => (mapaCategorias[a.id]?.kilos || 0) > 0).length;
 
           // Filtrar por query de búsqueda local
           const apicultoresFinales = apicultoresOrdenados.filter(a => {
@@ -3343,6 +3335,49 @@ function App() {
 
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {/* Selector / Banner de Control de Simulación */}
+              <div className="card-premium" style={{ 
+                padding: '1rem', 
+                backgroundColor: 'rgba(8,32,26,0.02)', 
+                border: '1px solid var(--border-color)', 
+                borderRadius: '12px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '1rem'
+              }}>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '24px', color: 'var(--secondary)' }}>insights</span>
+                  <div>
+                    <strong style={{ color: 'var(--text-title)', fontSize: '0.9rem' }}>Visualización Concentración de Acopio (80/20)</strong>
+                    <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      {mostrarSimulacionPareto 
+                        ? 'Simulando datos de ejemplo para visualizar el funcionamiento de la categorización Pareto. Desactiva para ver la base de datos limpia.'
+                        : 'Mostrando datos reales de Supabase (actualmente vacíos para tus pruebas limpias de Power Automate).'}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMostrarSimulacionPareto(!mostrarSimulacionPareto)}
+                  style={{
+                    padding: '0.5rem 1.25rem',
+                    backgroundColor: mostrarSimulacionPareto ? 'var(--secondary)' : 'var(--primary)',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 700,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {mostrarSimulacionPareto ? 'Ver Datos Reales (Vacíos)' : 'Simular Datos 80/20'}
+                </button>
+              </div>
+
               {/* Tarjetas KPI de Concentración Pareto */}
               <div style={{
                 display: 'grid',
@@ -3354,7 +3389,9 @@ function App() {
                   <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
                     {totalMielFisica.toLocaleString('es-AR')} kg
                   </h2>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Miel física real ingresada</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    {mostrarSimulacionPareto ? 'Miel de ejemplo para demostración' : 'Miel física real ingresada'}
+                  </span>
                 </div>
 
                 <div className="card-premium" style={{ padding: '1.25rem', borderLeft: '4px solid #10B981' }}>
@@ -3448,13 +3485,14 @@ function App() {
                         </tr>
                       ) : (
                         apicultoresFinales.map((a) => {
-                          const kilos = kilosPorApicultor[a.id] || 0;
-                          const pct = totalMielFisica > 0 ? (kilos / totalMielFisica) * 100 : 0;
+                          const info = mapaCategorias[a.id] || { categoria: 'B', kilos: 0, porcentaje: 0 };
+                          const kilos = info.kilos;
+                          const pct = info.porcentaje;
                           
                           // Calcular el acumulado real en la lista completa
                           let realAccKilos = 0;
                           for (let i = 0; i < apicultoresOrdenados.length; i++) {
-                            const curKilos = kilosPorApicultor[apicultoresOrdenados[i].id] || 0;
+                            const curKilos = mapaCategorias[apicultoresOrdenados[i].id]?.kilos || 0;
                             realAccKilos += curKilos;
                             if (apicultoresOrdenados[i].id === a.id) {
                               break;
@@ -3489,8 +3527,8 @@ function App() {
                                 {pct.toFixed(2)}%
                               </td>
                               <td className="font-mono text-right" style={{ 
-                                color: realAccPct <= 80 ? '#137333' : 'var(--text-secondary)',
-                                fontWeight: realAccPct <= 80 ? 700 : 500
+                                color: realAccPct <= 80 && kilos > 0 ? '#137333' : 'var(--text-secondary)',
+                                fontWeight: realAccPct <= 80 && kilos > 0 ? 700 : 500
                               }}>
                                 {realAccPct.toFixed(2)}%
                               </td>
