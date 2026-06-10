@@ -65,7 +65,7 @@ function App() {
   const [view, setView] = useState<'dashboard' | 'directorio' | 'detail' | 'alertas' | 'embudo' | 'pareto'>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [filtroAlerta, setFiltroAlerta] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'entregas' | 'envases' | 'cuenta_corriente' | 'operculo'>('general');
+  const [activeTab, setActiveTab] = useState<'entregas' | 'envases' | 'cuenta_corriente'>('entregas');
   const [productos, setProductos] = useState<Producto[]>([]);
   const [entregas, setEntregas] = useState<FichaEntregaMiel[]>([]);
   const [globalStats, setGlobalStats] = useState<{
@@ -99,10 +99,9 @@ function App() {
   
   // Estados para diálogos (Modales)
   const [showAddApicultor, setShowAddApicultor] = useState(false);
-  const [showAddEntrega, setShowAddEntrega] = useState(false);
-  const [showAddEnvase, setShowAddEnvase] = useState(false);
+  const [showAddRecoleccion, setShowAddRecoleccion] = useState(false);
+  const [showAddDistribucion, setShowAddDistribucion] = useState(false);
   const [showAddCC, setShowAddCC] = useState(false);
-  const [showAddOperculo, setShowAddOperculo] = useState(false);
   const [showPowerAutomateGuide, setShowPowerAutomateGuide] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
@@ -124,8 +123,39 @@ function App() {
     tag: 'PRODUCTOR',
     notas_onboarding: ''
   });
-  const [newEntregaForm, setNewEntregaForm] = useState({ pfund: 34, humedad: 17.5, hmf: 10, tambores: 5, kilos: 1500 });
-  const [newEnvaseForm, setNewEnvaseForm] = useState({ tipo: 'PRESTAMO' as 'PRESTAMO' | 'DEVOLUCION', cantidad: 10, obs: '' });
+  const [recoleccionForm, setRecoleccionForm] = useState({
+    fecha: new Date().toISOString().substring(0, 10),
+    observaciones: '',
+    hasMiel: false,
+    romaneo: '',
+    tamboresQty: 1,
+    kilosNeto: 300,
+    colorPfund: 34,
+    humedad: 17.5,
+    hmf: 12,
+    lote: '',
+    hasOperculo: false,
+    kilosOp: 100,
+    rendimientoCera: 0.8,
+    hasRecupero: false,
+    kilosRecupero: 50
+  });
+  const [distribucionForm, setDistribucionForm] = useState({
+    fecha: new Date().toISOString().substring(0, 10),
+    observaciones: '',
+    hasVacios: false,
+    tipoTambor: 'TRR',
+    vaciosQty: 10,
+    hasAzucar: false,
+    azucarQty: 20,
+    precioAzucar: 45000,
+    monedaAzucar: 'ARS',
+    hasCeraEstampada: false,
+    tipoCeraEstampada: 'CE STD',
+    ceraEstampadaQty: 50,
+    precioCeraEstampada: 4800,
+    monedaCeraEstampada: 'ARS'
+  });
   const [newCCForm, setNewCCForm] = useState({ 
     moneda: 'ARS' as 'ARS' | 'USD', 
     tipo: 'DEBE' as 'DEBE' | 'HABER', 
@@ -136,13 +166,7 @@ function App() {
     kilos_miel_equiv: 0,
     tipo_transaccion: 'ANTICIPO_CASH' as 'ANTICIPO_CASH' | 'RETIRO_INSUMO' | 'CARGO_ENVASE' | 'VENTA_LIQUIDACION' | 'SALDO_INICIAL' | 'AJUSTE'
   });
-  const [newOperculoForm, setNewOperculoForm] = useState({
-    tipo: 'ENTREGA_OP' as 'ENTREGA_OP' | 'RETIRO_CERA' | 'AJUSTE',
-    kilos_op: 100,
-    rendimiento_cera: 0.8,
-    detalle: '',
-    fecha: ''
-  });
+
 
   // Estados para cálculos reactivos en Cuenta Corriente (Formularios Avanzados)
   const [insumoCodigo, setInsumoCodigo] = useState<number | 'manual'>('manual');
@@ -287,7 +311,7 @@ function App() {
       const completo = await srmService.getApicultor(id);
       setApicultorSeleccionado(completo);
       setView('detail');
-      setActiveTab('general');
+      setActiveTab('entregas');
     } catch (e) {
       console.error('Error al obtener ficha completa:', e);
     }
@@ -300,6 +324,54 @@ function App() {
     }
     return '';
   };
+
+  // Helper para calcular estadísticas de un romaneo individual
+  const computeRomaneoStats = (tambores: any[]) => {
+    let clara = 0;
+    let oscura = 0;
+    let altos = 0;
+    let petisos = 0;
+
+    (tambores || []).forEach(t => {
+      if (t.color_pfund != null) {
+        if (t.color_pfund < 50) clara++;
+        else oscura++;
+      }
+      if (t.kilos_bruto != null) {
+        if (t.kilos_bruto >= 331) altos++;
+        else petisos++;
+      }
+    });
+
+    return { clara, oscura, altos, petisos };
+  };
+
+  // Estadísticas globales de clasificación de tambores para el apicultor seleccionado
+  const statsTambores = useMemo(() => {
+    let clara = 0;
+    let oscura = 0;
+    let altos = 0;
+    let petisos = 0;
+
+    if (!apicultorSeleccionado) {
+      return { clara, oscura, altos, petisos };
+    }
+
+    apicultorSeleccionado.entregas.forEach(e => {
+      (e.tambores || []).forEach(t => {
+        if (t.color_pfund != null) {
+          if (t.color_pfund < 50) clara++;
+          else oscura++;
+        }
+        if (t.kilos_bruto != null) {
+          if (t.kilos_bruto >= 331) altos++;
+          else petisos++;
+        }
+      });
+    });
+
+    return { clara, oscura, altos, petisos };
+  }, [apicultorSeleccionado]);
 
   // Categorización Pareto 80/20 dinámica basada en volumen neto acumulado
   const apicultoresCategorizados = useMemo(() => {
@@ -921,40 +993,195 @@ function App() {
     );
   };
 
-  const handleCreateEntrega = async (e: React.FormEvent) => {
+  const handleCreateRecoleccion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!apicultorSeleccionado) return;
     try {
-      await srmService.createEntrega(
-        apicultorSeleccionado.id,
-        newEntregaForm.pfund,
-        newEntregaForm.humedad,
-        newEntregaForm.hmf,
-        newEntregaForm.tambores,
-        newEntregaForm.kilos
-      );
-      setShowAddEntrega(false);
+      const {
+        fecha, observaciones,
+        hasMiel, romaneo, tamboresQty, kilosNeto, colorPfund, humedad, hmf, lote,
+        hasOperculo, kilosOp, rendimientoCera,
+        hasRecupero, kilosRecupero
+      } = recoleccionForm;
+
+      if (!hasMiel && !hasOperculo && !hasRecupero) {
+        alert('Debe seleccionar al menos una operación (Miel, Opérculo o Recupero).');
+        return;
+      }
+
+      // 1. Miel (TCM)
+      if (hasMiel) {
+        const entrega = await srmService.createEntrega(
+          apicultorSeleccionado.id,
+          colorPfund,
+          humedad,
+          hmf,
+          tamboresQty,
+          kilosNeto,
+          fecha
+        );
+        // Descontar automáticamente envases en campo
+        await srmService.createEnvaseMovimiento(
+          apicultorSeleccionado.id,
+          'DEVOLUCION',
+          tamboresQty,
+          `Descuento por Miel Recolectada (Romaneo: #${romaneo || 'S/N'}, Lote: ${lote || 'N/A'})`,
+          fecha
+        );
+        // Crear tambores individuales para el romaneo en el mock db
+        const parsedLote = parseInt(lote) || 13006;
+        const avgBruto = Math.round(kilosNeto / tamboresQty) + 16;
+        for (let i = 0; i < tamboresQty; i++) {
+          await srmService.createEntregaTambor(
+            entrega.id,
+            `TAMB-${Math.floor(100000 + Math.random() * 900000)}`,
+            `18-${Math.floor(10000000 + Math.random() * 90000000)}-${Math.floor(Math.random() * 9)}`,
+            parsedLote,
+            avgBruto,
+            16,
+            colorPfund,
+            humedad,
+            hmf,
+            'NEGATIVO'
+          );
+        }
+      }
+
+      // 2. Cera de Opérculo
+      if (hasOperculo) {
+        await srmService.createOperculoMovimiento(
+          apicultorSeleccionado.id,
+          'ENTREGA_OP',
+          kilosOp,
+          rendimientoCera,
+          `Recolección Opérculo (${observaciones || 'Cappings'})`,
+          fecha
+        );
+      }
+
+      // 3. Cera de Recupero
+      if (hasRecupero) {
+        await srmService.createOperculoMovimiento(
+          apicultorSeleccionado.id,
+          'ENTREGA_OP',
+          kilosRecupero,
+          1.0, // Rendimiento 1.0 porque es cera pura
+          `Recolección Cera Recupero (${observaciones || 'Pura'})`,
+          fecha
+        );
+      }
+
+      setShowAddRecoleccion(false);
+      // Reset form
+      setRecoleccionForm({
+        fecha: new Date().toISOString().substring(0, 10),
+        observaciones: '',
+        hasMiel: false,
+        romaneo: '',
+        tamboresQty: 1,
+        kilosNeto: 300,
+        colorPfund: 34,
+        humedad: 17.5,
+        hmf: 12,
+        lote: '',
+        hasOperculo: false,
+        kilosOp: 100,
+        rendimientoCera: 0.8,
+        hasRecupero: false,
+        kilosRecupero: 50
+      });
+      // Refetch data
       seleccionarApicultor(apicultorSeleccionado.id);
     } catch (err) {
-      alert('Error registrando entrega: ' + err);
+      alert('Error registrando recolección: ' + err);
     }
   };
 
-  const handleCreateEnvase = async (e: React.FormEvent) => {
+  const handleCreateDistribucion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!apicultorSeleccionado) return;
     try {
-      await srmService.createEnvaseMovimiento(
-        apicultorSeleccionado.id,
-        newEnvaseForm.tipo,
-        newEnvaseForm.cantidad,
-        newEnvaseForm.obs
-      );
-      setShowAddEnvase(false);
-      setNewEnvaseForm({ tipo: 'PRESTAMO', cantidad: 10, obs: '' });
+      const {
+        fecha, observaciones,
+        hasVacios, tipoTambor, vaciosQty,
+        hasAzucar, azucarQty, precioAzucar, monedaAzucar,
+        hasCeraEstampada, tipoCeraEstampada, ceraEstampadaQty, precioCeraEstampada, monedaCeraEstampada
+      } = distribucionForm;
+
+      if (!hasVacios && !hasAzucar && !hasCeraEstampada) {
+        alert('Debe seleccionar al menos una entrega (Tambores, Azúcar o Cera Estampada).');
+        return;
+      }
+
+      // 1. Tambores Vacíos (Préstamo)
+      if (hasVacios) {
+        await srmService.createEnvaseMovimiento(
+          apicultorSeleccionado.id,
+          'PRESTAMO',
+          vaciosQty,
+          `Préstamo Tambores Vacíos (${tipoTambor}) - ${observaciones || 'Envío'}`,
+          fecha
+        );
+      }
+
+      // 2. Azúcar
+      if (hasAzucar) {
+        const monto = azucarQty * precioAzucar;
+        const refPrice = monedaAzucar === 'USD' ? 1.0 : 1700;
+        const kilosMielEquiv = - (monto / refPrice);
+        await srmService.createCuentaCorrienteMovimiento(
+          apicultorSeleccionado.id,
+          monedaAzucar as 'ARS' | 'USD',
+          'DEBE',
+          monto,
+          `Distribución Insumo: Azúcar x ${azucarQty} bolsas (Precio: ${precioAzucar} c/u)`,
+          fecha,
+          refPrice,
+          kilosMielEquiv,
+          'RETIRO_INSUMO'
+        );
+      }
+
+      // 3. Cera Estampada
+      if (hasCeraEstampada) {
+        const monto = ceraEstampadaQty * precioCeraEstampada;
+        const refPrice = monedaCeraEstampada === 'USD' ? 1.0 : 1700;
+        const kilosMielEquiv = - (monto / refPrice);
+        await srmService.createCuentaCorrienteMovimiento(
+          apicultorSeleccionado.id,
+          monedaCeraEstampada as 'ARS' | 'USD',
+          'DEBE',
+          monto,
+          `Distribución Insumo: Cera Estampada ${tipoCeraEstampada} x ${ceraEstampadaQty} kg (Precio: ${precioCeraEstampada} c/u)`,
+          fecha,
+          refPrice,
+          kilosMielEquiv,
+          'RETIRO_INSUMO'
+        );
+      }
+
+      setShowAddDistribucion(false);
+      // Reset form
+      setDistribucionForm({
+        fecha: new Date().toISOString().substring(0, 10),
+        observaciones: '',
+        hasVacios: false,
+        tipoTambor: 'TRR',
+        vaciosQty: 10,
+        hasAzucar: false,
+        azucarQty: 20,
+        precioAzucar: 45000,
+        monedaAzucar: 'ARS',
+        hasCeraEstampada: false,
+        tipoCeraEstampada: 'CE STD',
+        ceraEstampadaQty: 50,
+        precioCeraEstampada: 4800,
+        monedaCeraEstampada: 'ARS'
+      });
+      // Refetch data
       seleccionarApicultor(apicultorSeleccionado.id);
     } catch (err) {
-      alert('Error registrando movimiento: ' + err);
+      alert('Error registrando distribución: ' + err);
     }
   };
 
@@ -1000,38 +1227,6 @@ function App() {
       seleccionarApicultor(apicultorSeleccionado.id);
     } catch (err) {
       alert('Error registrando transacción: ' + err);
-    }
-  };
-
-  const handleCreateOperculo = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!apicultorSeleccionado) return;
-    try {
-      let finalKilosOp = newOperculoForm.kilos_op;
-      if (newOperculoForm.tipo === 'RETIRO_CERA') {
-        // Cappings equivalent is negative for withdrawals (e.g. -70/0.8)
-        finalKilosOp = -Math.abs(newOperculoForm.kilos_op / newOperculoForm.rendimiento_cera);
-      }
-
-      await srmService.createOperculoMovimiento(
-        apicultorSeleccionado.id,
-        newOperculoForm.tipo,
-        finalKilosOp,
-        newOperculoForm.rendimiento_cera,
-        newOperculoForm.detalle,
-        newOperculoForm.fecha || undefined
-      );
-      setShowAddOperculo(false);
-      setNewOperculoForm({
-        tipo: 'ENTREGA_OP',
-        kilos_op: 100,
-        rendimiento_cera: 0.8,
-        detalle: '',
-        fecha: ''
-      });
-      seleccionarApicultor(apicultorSeleccionado.id);
-    } catch (err) {
-      alert('Error registrando movimiento de opérculo: ' + err);
     }
   };
 
@@ -2649,24 +2844,8 @@ function App() {
                 
                 {/* Perfil del Apicultor */}
                 <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '1.25rem' }}>
-                  <div style={{
-                    width: '90px',
-                    height: '90px',
-                    borderRadius: '50%',
-                    backgroundColor: 'var(--bg-sidebar-active)',
-                    color: 'var(--primary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 800,
-                    fontSize: '2rem',
-                    border: '3px solid var(--border-color-glow)',
-                    fontFamily: 'var(--font-title)'
-                  }}>
-                    {apicultorSeleccionado.nombre.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
-                  </div>
-                  <div>
-                    <h2 className="font-title" style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-title)' }}>
+                  <div style={{ width: '100%' }}>
+                    <h2 className="font-title" style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-title)', marginBottom: '0.25rem' }}>
                       {apicultorSeleccionado.nombre}
                     </h2>
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
@@ -2703,10 +2882,26 @@ function App() {
                     </div>
                     <div>
                       <span className="label-caps" style={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.125rem' }}>
-                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>mail</span> Correo Electrónico
+                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>fingerprint</span> CUIT
                       </span>
-                      <strong style={{ fontSize: '0.85rem', color: 'var(--text-title)' }}>
-                        {apicultorSeleccionado.nombre.toLowerCase().replace(/ /g, '')}@geomiel.com
+                      <strong style={{ fontSize: '0.85rem', color: 'var(--text-title)' }} className="font-mono">
+                        {apicultorSeleccionado.cuit || '-'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="label-caps" style={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.125rem' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>badge</span> DNI
+                      </span>
+                      <strong style={{ fontSize: '0.85rem', color: 'var(--text-title)' }} className="font-mono">
+                        {apicultorSeleccionado.dni || '-'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="label-caps" style={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.125rem' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>hive</span> RENAPA
+                      </span>
+                      <strong className="font-mono" style={{ fontSize: '0.85rem', color: 'var(--text-title)', textTransform: 'uppercase' }}>
+                        {apicultorSeleccionado.renapa || '-'}
                       </strong>
                     </div>
                   </div>
@@ -2782,6 +2977,41 @@ function App() {
                   );
                 })()}
 
+                {/* Clasificación de Acopio (Tambores) */}
+                <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <span className="label-caps" style={{ fontSize: '0.65rem' }}>Clasificación de Acopio (Tambores)</span>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div style={{ padding: '0.75rem', borderRadius: '8px', backgroundColor: 'var(--bg-sidebar-active)', border: '1px solid var(--border-color)' }}>
+                      <span className="label-caps" style={{ fontSize: '0.55rem', color: 'var(--text-secondary)' }}>Por Color (Pfund)</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.5rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                          <span style={{ color: 'var(--text-body)' }}>Clara (&lt; 50mm)</span>
+                          <strong style={{ color: 'var(--primary)' }}>{statsTambores.clara}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                          <span style={{ color: 'var(--text-body)' }}>Oscura (&ge; 50mm)</span>
+                          <strong style={{ color: 'var(--secondary)' }}>{statsTambores.oscura}</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '0.75rem', borderRadius: '8px', backgroundColor: 'var(--bg-sidebar-active)', border: '1px solid var(--border-color)' }}>
+                      <span className="label-caps" style={{ fontSize: '0.55rem', color: 'var(--text-secondary)' }}>Por Tamaño (Bruto)</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.5rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                          <span style={{ color: 'var(--text-body)' }}>Altos (&ge; 331kg)</span>
+                          <strong style={{ color: 'var(--text-title)' }}>{statsTambores.altos}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                          <span style={{ color: 'var(--text-body)' }}>Petisos (&le; 330kg)</span>
+                          <strong style={{ color: 'var(--text-title)' }}>{statsTambores.petisos}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
               </div>
 
               {/* Columna Derecha: KPIs e Historial de Transacciones */}
@@ -2821,40 +3051,34 @@ function App() {
                   <span className="label-caps" style={{ fontSize: '0.65rem' }}>Operaciones Comerciales</span>
                   <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <button 
-                      onClick={() => setShowAddEntrega(true)}
+                      onClick={() => setShowAddRecoleccion(true)}
                       style={{
-                        padding: '0.5rem 1rem', borderRadius: '8px', backgroundColor: 'var(--secondary)',
-                        color: '#FFFFFF', fontWeight: 700, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem'
+                        padding: '0.5rem 1rem', borderRadius: '8px', backgroundColor: 'var(--primary)',
+                        color: '#FFFFFF', fontWeight: 700, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                        border: 'none', cursor: 'pointer'
                       }}
                     >
-                      <Plus size={14} style={{ color: '#FFFFFF' }} /> Registrar Entrega
+                      <Plus size={14} style={{ color: '#FFFFFF' }} /> Registrar Recolección
                     </button>
                     <button 
-                      onClick={() => setShowAddEnvase(true)}
+                      onClick={() => setShowAddDistribucion(true)}
                       style={{
-                        padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)',
-                        backgroundColor: '#FFFFFF', color: 'var(--text-body)', fontWeight: 700, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem'
+                        padding: '0.5rem 1rem', borderRadius: '8px', backgroundColor: 'var(--secondary)',
+                        color: '#FFFFFF', fontWeight: 700, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                        border: 'none', cursor: 'pointer'
                       }}
                     >
-                      <Truck size={14} /> Registrar Envases
+                      <Truck size={14} style={{ color: '#FFFFFF' }} /> Registrar Distribución
                     </button>
                     <button 
                       onClick={() => setShowAddCC(true)}
                       style={{
                         padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)',
-                        backgroundColor: '#FFFFFF', color: 'var(--text-body)', fontWeight: 700, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem'
+                        backgroundColor: '#FFFFFF', color: 'var(--text-body)', fontWeight: 700, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                        cursor: 'pointer'
                       }}
                     >
                       <DollarSign size={14} /> Transacción CC
-                    </button>
-                    <button 
-                      onClick={() => setShowAddOperculo(true)}
-                      style={{
-                        padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)',
-                        backgroundColor: '#FFFFFF', color: 'var(--text-body)', fontWeight: 700, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem'
-                      }}
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>hive</span> Opérculo
                     </button>
                   </div>
                 </div>
@@ -2905,13 +3129,15 @@ function App() {
                           
                           apicultorSeleccionado.entregas.forEach(e => {
                             list.push({
+                              id: e.id,
                               fecha: e.fecha,
                               operacion: `Entrega de Miel (${e.cantidad_tambores} TCM)`,
                               documento: e.romaneo ? `Romaneo #${e.romaneo}` : 'S/N',
                               tambores: e.cantidad_tambores,
                               importe: e.kilos_neto.toLocaleString() + ' kg',
                               est: 'Procesado',
-                              tipo: 'delivery'
+                              tipo: 'delivery',
+                              rawEntrega: e
                             });
                           });
 
@@ -2954,39 +3180,147 @@ function App() {
                             );
                           }
 
-                          return list.map((item, idx) => (
-                            <tr key={idx} className="table-row-hover">
-                              <td className="font-mono">{new Date(item.fecha).toLocaleDateString('es-AR')}</td>
-                              <td>
-                                <strong style={{ color: 'var(--text-title)' }}>{item.operacion}</strong>
-                              </td>
-                              <td className="text-center">
-                                {item.documento !== '--' ? (
-                                  <span className="badge" style={{ backgroundColor: 'rgba(8,32,26,0.06)', color: 'var(--primary)', fontWeight: 700, fontSize: '0.75rem' }}>
-                                    {item.documento}
-                                  </span>
-                                ) : (
-                                  <span style={{ color: 'var(--text-secondary)' }}>--</span>
+                          return list.map((item, idx) => {
+                            const isExpanded = item.tipo === 'delivery' && expandedRomaneos[item.id];
+                            return (
+                              <Fragment key={idx}>
+                                <tr 
+                                  className={`table-row-hover ${item.tipo === 'delivery' ? 'cursor-pointer' : ''}`}
+                                  onClick={() => {
+                                    if (item.tipo === 'delivery' && item.id) {
+                                      setExpandedRomaneos(prev => ({
+                                        ...prev,
+                                        [item.id]: !prev[item.id]
+                                      }));
+                                    }
+                                  }}
+                                >
+                                  <td className="font-mono">{new Date(item.fecha).toLocaleDateString('es-AR')}</td>
+                                  <td>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                      {item.tipo === 'delivery' && (
+                                        <span className="material-symbols-outlined" style={{ 
+                                          fontSize: '18px', 
+                                          color: 'var(--text-secondary)',
+                                          transform: isExpanded ? 'rotate(90deg)' : 'none',
+                                          transition: 'transform 0.2s'
+                                        }}>
+                                          chevron_right
+                                        </span>
+                                      )}
+                                      <strong style={{ color: 'var(--text-title)' }}>{item.operacion}</strong>
+                                    </div>
+                                  </td>
+                                  <td className="text-center">
+                                    {item.documento !== '--' ? (
+                                      <span className="badge" style={{ backgroundColor: 'rgba(8,32,26,0.06)', color: 'var(--primary)', fontWeight: 700, fontSize: '0.75rem' }}>
+                                        {item.documento}
+                                      </span>
+                                    ) : (
+                                      <span style={{ color: 'var(--text-secondary)' }}>--</span>
+                                    )}
+                                  </td>
+                                  <td className="font-mono text-center" style={{ color: item.tambores !== 0 ? 'var(--text-title)' : 'var(--text-secondary)' }}>
+                                    {item.tambores !== 0 ? (item.tambores > 0 ? `+${item.tambores}` : item.tambores) : '--'}
+                                  </td>
+                                  <td className="font-mono text-right" style={{ 
+                                    fontWeight: 700, 
+                                    color: item.importe.startsWith('-') ? 'var(--danger)' : (item.importe.startsWith('+') ? '#137333' : 'var(--text-title)') 
+                                  }}>
+                                    {item.importe}
+                                  </td>
+                                  <td className="text-right">
+                                    <span className={`badge ${
+                                      item.est === 'Procesado' ? 'badge-success' : item.est === 'Confirmado' ? 'badge-info' : 'badge-amber'
+                                    }`}>
+                                      {item.est}
+                                    </span>
+                                  </td>
+                                </tr>
+
+                                {item.tipo === 'delivery' && isExpanded && (
+                                  <tr>
+                                    <td colSpan={6} style={{ backgroundColor: 'rgba(8,32,26,0.01)', padding: '0.75rem 1rem' }}>
+                                      <div style={{
+                                        borderLeft: '3px solid var(--primary)',
+                                        paddingLeft: '1rem',
+                                        paddingTop: '0.25rem',
+                                        paddingBottom: '0.25rem',
+                                        textAlign: 'left'
+                                      }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                          <h4 className="font-title" style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-title)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.35rem', margin: 0 }}>
+                                            <span className="material-symbols-outlined" style={{ fontSize: '1rem', color: 'var(--primary)' }}>science</span>
+                                            Detalle Técnico de Tambores - {item.documento}
+                                          </h4>
+                                          
+                                          {/* Stats for this Romaneo */}
+                                          {(() => {
+                                            const rStats = computeRomaneoStats(item.rawEntrega.tambores);
+                                            return (
+                                              <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                                                <span>Claras (&lt;50mm): <strong style={{ color: 'var(--primary)' }}>{rStats.clara}</strong></span>
+                                                <span>Oscuras (&ge;50mm): <strong style={{ color: 'var(--secondary)' }}>{rStats.oscura}</strong></span>
+                                                <span>Altos (&ge;331kg): <strong style={{ color: 'var(--text-title)' }}>{rStats.altos}</strong></span>
+                                                <span>Petisos (&le;330kg): <strong style={{ color: 'var(--text-title)' }}>{rStats.petisos}</strong></span>
+                                              </div>
+                                            );
+                                          })()}
+                                        </div>
+
+                                        {(!item.rawEntrega.tambores || item.rawEntrega.tambores.length === 0) ? (
+                                          <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0 }}>No hay tambores individuales registrados para esta entrega.</p>
+                                        ) : (
+                                          <div className="table-container" style={{ margin: '0.5rem 0', boxShadow: 'none', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                                            <table className="table-premium" style={{ width: '100%', fontSize: '0.75rem' }}>
+                                              <thead>
+                                                <tr style={{ backgroundColor: '#F9F9F9' }}>
+                                                  <th>ID GEO (Tambor)</th>
+                                                  <th>Cod. SENASA</th>
+                                                  <th>Lote</th>
+                                                  <th style={{ textAlign: 'right' }}>Peso Bruto</th>
+                                                  <th style={{ textAlign: 'right' }}>Tara</th>
+                                                  <th style={{ textAlign: 'right' }}>Peso Neto</th>
+                                                  <th style={{ textAlign: 'center' }}>Humedad</th>
+                                                  <th style={{ textAlign: 'center' }}>Color (mm)</th>
+                                                  <th style={{ textAlign: 'center' }}>HMF</th>
+                                                  <th>Antibiótico</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {item.rawEntrega.tambores.map((t: any) => (
+                                                  <tr key={t.id} style={{ backgroundColor: '#FFFFFF' }}>
+                                                    <td><strong style={{ color: 'var(--text-title)', fontFamily: 'monospace' }}>{t.nro_tambor}</strong></td>
+                                                    <td className="font-mono" style={{ whiteSpace: 'nowrap' }}>{t.barras_ean || '-'}</td>
+                                                    <td className="font-mono">{t.lote || '-'}</td>
+                                                    <td className="font-mono text-right" style={{ whiteSpace: 'nowrap' }}>{t.kilos_bruto != null ? `${t.kilos_bruto.toFixed(1)} kg` : '-'}</td>
+                                                    <td className="font-mono text-right" style={{ whiteSpace: 'nowrap' }}>{t.tara != null ? `${t.tara.toFixed(1)} kg` : '-'}</td>
+                                                    <td className="font-mono text-right" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{t.kilos_neto != null ? `${t.kilos_neto.toFixed(1)} kg` : '-'}</td>
+                                                    <td className="font-mono text-center" style={{ fontWeight: 700, color: t.humedad && t.humedad > 18 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
+                                                      {t.humedad != null ? `${t.humedad}%` : '-'}
+                                                    </td>
+                                                    <td className="font-mono text-center" style={{ whiteSpace: 'nowrap' }}>{t.color_pfund != null ? `${t.color_pfund} mm` : '-'}</td>
+                                                    <td className="font-mono text-center" style={{ fontWeight: 700, color: t.hmf && t.hmf > 40 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
+                                                      {t.hmf != null ? `${t.hmf} mg/kg` : '-'}
+                                                    </td>
+                                                    <td>
+                                                      <span className={`badge ${t.antibiotico === 'POSITIVO' ? 'badge-danger' : 'badge-success'}`} style={{ fontSize: '0.6rem', padding: '0.15rem 0.35rem' }}>
+                                                        {t.antibiotico || 'NEGATIVO'}
+                                                      </span>
+                                                    </td>
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
                                 )}
-                              </td>
-                              <td className="font-mono text-center" style={{ color: item.tambores !== 0 ? 'var(--text-title)' : 'var(--text-secondary)' }}>
-                                {item.tambores !== 0 ? (item.tambores > 0 ? `+${item.tambores}` : item.tambores) : '--'}
-                              </td>
-                              <td className="font-mono text-right" style={{ 
-                                fontWeight: 700, 
-                                color: item.importe.startsWith('-') ? 'var(--danger)' : (item.importe.startsWith('+') ? '#137333' : 'var(--text-title)') 
-                              }}>
-                                {item.importe}
-                              </td>
-                              <td className="text-right">
-                                <span className={`badge ${
-                                  item.est === 'Procesado' ? 'badge-success' : item.est === 'Confirmado' ? 'badge-info' : 'badge-amber'
-                                }`}>
-                                  {item.est}
-                                </span>
-                              </td>
-                            </tr>
-                          ));
+                              </Fragment>
+                            );
+                          });
                         })()}
                       </tbody>
                     </table>
@@ -2996,18 +3330,16 @@ function App() {
                 {/* Sección Desplegable para Análisis Técnico Secundario (Tabs de Detalles) */}
                 <details className="card-premium" style={{ cursor: 'pointer' }}>
                   <summary style={{ fontWeight: 800, color: 'var(--text-title)', fontSize: '0.9rem', outline: 'none' }}>
-                    📊 Ver Radiografía Técnica Avanzada (Análisis de Tambores, Cuentas Corrientes y Ceras)
+                    📊 Detalle de Operaciones y Ficha Técnica
                   </summary>
                   <div style={{ marginTop: '1rem', cursor: 'default' }}>
                     
                     {/* Tabs */}
                     <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', gap: '1rem', overflowX: 'auto', marginBottom: '1rem' }}>
                       {[
-                        { id: 'general', label: 'Ficha Impositiva' },
                         { id: 'entregas', label: `Historial de Romaneos (${apicultorSeleccionado.entregas.length})` },
                         { id: 'envases', label: 'Envases Detalle' },
-                        { id: 'cuenta_corriente', label: 'Cuenta Corriente / Kilos Equivalentes' },
-                        { id: 'operculo', label: `Opérculo y Cera (${apicultorSeleccionado.operculo?.length || 0})` }
+                        { id: 'cuenta_corriente', label: 'Cuenta Corriente / Kilos Equivalentes' }
                       ].map(t => (
                         <button
                           key={t.id}
@@ -3028,31 +3360,6 @@ function App() {
                     </div>
 
                     {/* Contenido Dinámico de Tabs */}
-                    {activeTab === 'general' && (
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem', padding: '0.5rem' }}>
-                        <div>
-                          <label className="label-caps">Código API</label>
-                          <p className="font-mono" style={{ fontWeight: 700 }}>{apicultorSeleccionado.cod_api || '-'}</p>
-                        </div>
-                        <div>
-                          <label className="label-caps">CUIT / DNI</label>
-                          <p className="font-mono" style={{ fontWeight: 700 }}>{apicultorSeleccionado.cuit} {apicultorSeleccionado.dni ? ` / ${apicultorSeleccionado.dni}` : ''}</p>
-                        </div>
-                        <div>
-                          <label className="label-caps">RENAPA</label>
-                          <p className="font-mono" style={{ fontWeight: 700, textTransform: 'uppercase' }}>{apicultorSeleccionado.renapa || '-'}</p>
-                        </div>
-                        <div>
-                          <label className="label-caps">Categorización 80/20</label>
-                          <p className="font-mono" style={{ fontWeight: 700 }}>
-                            {(() => {
-                              const catInfo = apicultoresCategorizados.mapaCategorias[apicultorSeleccionado.id] || { categoria: 'B' };
-                              return catInfo.categoria === 'A' ? 'Clase A (Socio VIP)' : 'Clase B (Estándar)';
-                            })()}
-                          </p>
-                        </div>
-                      </div>
-                    )}
 
                     {activeTab === 'entregas' && (
                       <div className="table-container">
@@ -3103,15 +3410,15 @@ function App() {
                                         </strong>
                                       </td>
                                       <td className="font-mono">{new Date(e.fecha).toLocaleDateString()}</td>
-                                      <td className="font-mono">{e.color_pfund} mm</td>
-                                      <td className="font-mono" style={{ fontWeight: 700, color: e.humedad > 18 ? 'var(--danger)' : 'var(--text-title)' }}>
-                                        {e.humedad}%
+                                      <td className="font-mono" style={{ whiteSpace: 'nowrap' }}>{e.color_pfund != null ? `${e.color_pfund} mm` : '-'}</td>
+                                      <td className="font-mono" style={{ fontWeight: 700, color: e.humedad && e.humedad > 18 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
+                                        {e.humedad != null ? `${e.humedad}%` : '-'}
                                       </td>
-                                      <td className="font-mono" style={{ fontWeight: 700, color: e.hmf > 40 ? 'var(--danger)' : 'var(--text-title)' }}>
-                                        {e.hmf} mg/kg
+                                      <td className="font-mono" style={{ fontWeight: 700, color: e.hmf && e.hmf > 40 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
+                                        {e.hmf != null ? `${e.hmf} mg/kg` : '-'}
                                       </td>
-                                      <td className="font-mono">{e.cantidad_tambores} TCM</td>
-                                      <td className="font-mono" style={{ fontWeight: 700 }}>{e.kilos_neto.toLocaleString()} kg</td>
+                                      <td className="font-mono" style={{ whiteSpace: 'nowrap' }}>{e.cantidad_tambores} TCM</td>
+                                      <td className="font-mono" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{e.kilos_neto != null ? `${e.kilos_neto.toLocaleString()} kg` : '-'}</td>
                                     </tr>
                                     
                                     {isExpanded && (
@@ -3152,17 +3459,17 @@ function App() {
                                                     {e.tambores.map((t) => (
                                                       <tr key={t.id} style={{ backgroundColor: '#FFFFFF' }}>
                                                         <td><strong style={{ color: 'var(--text-title)', fontFamily: 'monospace' }}>{t.nro_tambor}</strong></td>
-                                                        <td className="font-mono">{t.barras_ean || '-'}</td>
+                                                        <td className="font-mono" style={{ whiteSpace: 'nowrap' }}>{t.barras_ean || '-'}</td>
                                                         <td className="font-mono">{t.lote || '-'}</td>
-                                                        <td className="font-mono text-right">{t.kilos_bruto.toFixed(1)} kg</td>
-                                                        <td className="font-mono text-right">{t.tara.toFixed(1)} kg</td>
-                                                        <td className="font-mono text-right" style={{ fontWeight: 700 }}>{t.kilos_neto.toFixed(1)} kg</td>
-                                                        <td className="font-mono text-center" style={{ fontWeight: 700, color: t.humedad && t.humedad > 18 ? 'var(--danger)' : 'var(--text-title)' }}>
-                                                          {t.humedad !== undefined ? `${t.humedad}%` : '-'}
+                                                        <td className="font-mono text-right" style={{ whiteSpace: 'nowrap' }}>{t.kilos_bruto != null ? `${t.kilos_bruto.toFixed(1)} kg` : '-'}</td>
+                                                        <td className="font-mono text-right" style={{ whiteSpace: 'nowrap' }}>{t.tara != null ? `${t.tara.toFixed(1)} kg` : '-'}</td>
+                                                        <td className="font-mono text-right" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{t.kilos_neto != null ? `${t.kilos_neto.toFixed(1)} kg` : '-'}</td>
+                                                        <td className="font-mono text-center" style={{ fontWeight: 700, color: t.humedad && t.humedad > 18 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
+                                                          {t.humedad != null ? `${t.humedad}%` : '-'}
                                                         </td>
-                                                        <td className="font-mono text-center">{t.color_pfund !== undefined ? `${t.color_pfund} mm` : '-'}</td>
-                                                        <td className="font-mono text-center" style={{ fontWeight: 700, color: t.hmf && t.hmf > 40 ? 'var(--danger)' : 'var(--text-title)' }}>
-                                                          {t.hmf !== undefined ? `${t.hmf} mg/kg` : '-'}
+                                                        <td className="font-mono text-center" style={{ whiteSpace: 'nowrap' }}>{t.color_pfund != null ? `${t.color_pfund} mm` : '-'}</td>
+                                                        <td className="font-mono text-center" style={{ fontWeight: 700, color: t.hmf && t.hmf > 40 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
+                                                          {t.hmf != null ? `${t.hmf} mg/kg` : '-'}
                                                         </td>
                                                         <td>
                                                           <span className={`badge ${t.antibiotico === 'POSITIVO' ? 'badge-danger' : 'badge-success'}`} style={{ fontSize: '0.6rem', padding: '0.15rem 0.35rem' }}>
@@ -3263,42 +3570,7 @@ function App() {
                       </div>
                     )}
 
-                    {activeTab === 'operculo' && (
-                      <div className="table-container">
-                        <table className="table-premium">
-                          <thead>
-                            <tr>
-                              <th>Fecha</th>
-                              <th>Operación</th>
-                              <th>Detalle</th>
-                              <th>Rendimiento</th>
-                              <th>Opérculo (kg)</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(apicultorSeleccionado.operculo || []).length === 0 ? (
-                              <tr>
-                                <td colSpan={5} style={{ textAlign: 'center', padding: '1rem' }}>No hay movimientos de opérculo.</td>
-                              </tr>
-                            ) : (
-                              apicultorSeleccionado.operculo.map((op) => (
-                                <tr key={op.id}>
-                                  <td className="font-mono">{new Date(op.fecha).toLocaleDateString()}</td>
-                                  <td>
-                                    <span className={`badge ${op.kilos_op < 0 ? 'badge-danger' : 'badge-success'}`}>
-                                      {op.tipo_movimiento}
-                                    </span>
-                                  </td>
-                                  <td style={{ fontWeight: 600 }}>{op.detalle || '-'}</td>
-                                  <td className="font-mono">{op.rendimiento_cera}</td>
-                                  <td className="font-mono" style={{ fontWeight: 700 }}>{op.kilos_op > 0 ? '+' : ''}{op.kilos_op.toFixed(1)} kg</td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
+
 
                   </div>
                 </details>
@@ -3867,71 +4139,198 @@ function App() {
         </div>
       )}
 
-      {/* 2. Modal: Agregar Entrega de Miel */}
-      {showAddEntrega && (
+      {/* 2. Modal: Registrar Recolección (Unificado) */}
+      {showAddRecoleccion && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
           zIndex: 999, padding: '1rem'
         }}>
-          <div className="card-premium" style={{ width: '100%', maxWidth: '450px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Registrar Entrada de Lote de Miel</h3>
-            <form onSubmit={handleCreateEntrega} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+          <div className="card-premium" style={{ width: '100%', maxWidth: '500px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+              <span className="material-symbols-outlined" style={{ color: 'var(--primary)', fontSize: '24px' }}>download</span>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text-title)' }}>Registrar Recolección Comercial</h3>
+            </div>
+            
+            <form onSubmit={handleCreateRecoleccion} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Color Pfund (mm)</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Fecha Operación</label>
                   <input 
-                    type="number" required step="any"
+                    type="date" required
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                    value={newEntregaForm.pfund}
-                    onChange={e => setNewEntregaForm({ ...newEntregaForm, pfund: parseFloat(e.target.value) })}
+                    value={recoleccionForm.fecha}
+                    onChange={e => setRecoleccionForm({ ...recoleccionForm, fecha: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Humedad (%)</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Observaciones</label>
                   <input 
-                    type="number" required step="any"
+                    type="text"
+                    placeholder="Chofer, remito o notas..."
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                    value={newEntregaForm.humedad}
-                    onChange={e => setNewEntregaForm({ ...newEntregaForm, humedad: parseFloat(e.target.value) })}
-                  />
-                </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>HMF (mg/kg)</label>
-                  <input 
-                    type="number" required step="any"
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                    value={newEntregaForm.hmf}
-                    onChange={e => setNewEntregaForm({ ...newEntregaForm, hmf: parseFloat(e.target.value) })}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Cant. Tambores</label>
-                  <input 
-                    type="number" required
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                    value={newEntregaForm.tambores}
-                    onChange={e => setNewEntregaForm({ ...newEntregaForm, tambores: parseInt(e.target.value) })}
+                    value={recoleccionForm.observaciones}
+                    onChange={e => setRecoleccionForm({ ...recoleccionForm, observaciones: e.target.value })}
                   />
                 </div>
               </div>
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Kilos Neto</label>
-                <input 
-                  type="number" required step="any"
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                  value={newEntregaForm.kilos}
-                  onChange={e => setNewEntregaForm({ ...newEntregaForm, kilos: parseFloat(e.target.value) })}
-                />
+
+              {/* Checkbox: Miel */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: recoleccionForm.hasMiel ? 'rgba(8,32,26,0.02)' : '#FFFFFF' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-title)' }}>
+                  <input 
+                    type="checkbox"
+                    checked={recoleccionForm.hasMiel}
+                    onChange={e => setRecoleccionForm({ ...recoleccionForm, hasMiel: e.target.checked })}
+                  />
+                  🍯 Miel (TCM)
+                </label>
+                
+                {recoleccionForm.hasMiel && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Romaneo</label>
+                        <input 
+                          type="text" required placeholder="Ej: 8461"
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                          value={recoleccionForm.romaneo}
+                          onChange={e => setRecoleccionForm({ ...recoleccionForm, romaneo: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Lote</label>
+                        <input 
+                          type="text" placeholder="Ej: 13006"
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                          value={recoleccionForm.lote}
+                          onChange={e => setRecoleccionForm({ ...recoleccionForm, lote: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cant. Tambores</label>
+                        <input 
+                          type="number" required min="1"
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                          value={recoleccionForm.tamboresQty}
+                          onChange={e => setRecoleccionForm({ ...recoleccionForm, tamboresQty: parseInt(e.target.value) })}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Kilos Neto</label>
+                        <input 
+                          type="number" required min="1" step="any"
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                          value={recoleccionForm.kilosNeto}
+                          onChange={e => setRecoleccionForm({ ...recoleccionForm, kilosNeto: parseFloat(e.target.value) })}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Color (Pfund mm)</label>
+                        <input 
+                          type="number" required min="0" step="any"
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                          value={recoleccionForm.colorPfund}
+                          onChange={e => setRecoleccionForm({ ...recoleccionForm, colorPfund: parseFloat(e.target.value) })}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Humedad (%)</label>
+                        <input 
+                          type="number" required min="0" step="any"
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                          value={recoleccionForm.humedad}
+                          onChange={e => setRecoleccionForm({ ...recoleccionForm, humedad: parseFloat(e.target.value) })}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>HMF (mg/kg)</label>
+                        <input 
+                          type="number" required min="0" step="any"
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                          value={recoleccionForm.hmf}
+                          onChange={e => setRecoleccionForm({ ...recoleccionForm, hmf: parseFloat(e.target.value) })}
+                        />
+                      </div>
+                    </div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block' }}>
+                      💡 Al confirmar, se devolverán automáticamente <strong>{recoleccionForm.tamboresQty} tambores vacíos</strong> del campo del apicultor.
+                    </span>
+                  </div>
+                )}
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                <button type="button" onClick={() => setShowAddEntrega(false)} style={{ padding: '0.5rem 1rem', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+
+              {/* Checkbox: Opérculo */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: recoleccionForm.hasOperculo ? 'rgba(8,32,26,0.02)' : '#FFFFFF' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-title)' }}>
+                  <input 
+                    type="checkbox"
+                    checked={recoleccionForm.hasOperculo}
+                    onChange={e => setRecoleccionForm({ ...recoleccionForm, hasOperculo: e.target.checked })}
+                  />
+                  🐝 Cera de Opérculo
+                </label>
+                
+                {recoleccionForm.hasOperculo && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Kilos Opérculo</label>
+                      <input 
+                        type="number" required min="1" step="any"
+                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                        value={recoleccionForm.kilosOp}
+                        onChange={e => setRecoleccionForm({ ...recoleccionForm, kilosOp: parseFloat(e.target.value) })}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Rendimiento Cera</label>
+                      <input 
+                        type="number" required min="0" max="1" step="0.01"
+                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                        value={recoleccionForm.rendimientoCera}
+                        onChange={e => setRecoleccionForm({ ...recoleccionForm, rendimientoCera: parseFloat(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Checkbox: Cera de Recupero */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: recoleccionForm.hasRecupero ? 'rgba(8,32,26,0.02)' : '#FFFFFF' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-title)' }}>
+                  <input 
+                    type="checkbox"
+                    checked={recoleccionForm.hasRecupero}
+                    onChange={e => setRecoleccionForm({ ...recoleccionForm, hasRecupero: e.target.checked })}
+                  />
+                  🕯️ Cera de Recupero (Cera Pura)
+                </label>
+                
+                {recoleccionForm.hasRecupero && (
+                  <div style={{ marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Kilos Cera Recupero</label>
+                    <input 
+                      type="number" required min="1" step="any"
+                      style={{ width: '100%', maxWidth: '200px', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                      value={recoleccionForm.kilosRecupero}
+                      onChange={e => setRecoleccionForm({ ...recoleccionForm, kilosRecupero: parseFloat(e.target.value) })}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
+                <button type="button" onClick={() => setShowAddRecoleccion(false)} style={{ padding: '0.5rem 1rem', border: '1px solid var(--border-color)', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>
                   Cancelar
                 </button>
-                <button type="submit" style={{ padding: '0.5rem 1rem', backgroundColor: 'var(--secondary)', color: '#FFFFFF', borderRadius: '8px', fontWeight: 600 }}>
-                  Confirmar Entrega
+                <button type="submit" style={{ padding: '0.5rem 1rem', backgroundColor: 'var(--primary)', color: '#FFFFFF', borderRadius: '8px', fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+                  Confirmar Recolección
                 </button>
               </div>
             </form>
@@ -3939,52 +4338,200 @@ function App() {
         </div>
       )}
 
-      {/* 3. Modal: Agregar Movimiento de Envases */}
-      {showAddEnvase && (
+      {/* 3. Modal: Registrar Distribución (Unificado) */}
+      {showAddDistribucion && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
           zIndex: 999, padding: '1rem'
         }}>
-          <div className="card-premium" style={{ width: '100%', maxWidth: '450px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Registrar Movimiento de Tambores</h3>
-            <form onSubmit={handleCreateEnvase} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Tipo de Movimiento</label>
-                <select 
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
-                  value={newEnvaseForm.tipo}
-                  onChange={e => setNewEnvaseForm({ ...newEnvaseForm, tipo: e.target.value as any })}
-                >
-                  <option value="PRESTAMO">PRESTAMO (Se entregan tambores vacíos al productor)</option>
-                  <option value="DEVOLUCION">DEVOLUCION (El productor devuelve/entrega tambores)</option>
-                </select>
+          <div className="card-premium" style={{ width: '100%', maxWidth: '500px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+              <span className="material-symbols-outlined" style={{ color: 'var(--secondary)', fontSize: '24px' }}>upload</span>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text-title)' }}>Registrar Distribución Comercial</h3>
+            </div>
+            
+            <form onSubmit={handleCreateDistribucion} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Fecha Operación</label>
+                  <input 
+                    type="date" required
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    value={distribucionForm.fecha}
+                    onChange={e => setDistribucionForm({ ...distribucionForm, fecha: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Observaciones</label>
+                  <input 
+                    type="text"
+                    placeholder="Notas o remito..."
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    value={distribucionForm.observaciones}
+                    onChange={e => setDistribucionForm({ ...distribucionForm, observaciones: e.target.value })}
+                  />
+                </div>
               </div>
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Cantidad de Tambores</label>
-                <input 
-                  type="number" required min="1"
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                  value={newEnvaseForm.cantidad}
-                  onChange={e => setNewEnvaseForm({ ...newEnvaseForm, cantidad: parseInt(e.target.value) })}
-                />
+
+              {/* Checkbox: Tambores Vacíos */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: distribucionForm.hasVacios ? 'rgba(8,32,26,0.02)' : '#FFFFFF' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-title)' }}>
+                  <input 
+                    type="checkbox"
+                    checked={distribucionForm.hasVacios}
+                    onChange={e => setDistribucionForm({ ...distribucionForm, hasVacios: e.target.checked })}
+                  />
+                  🛢️ Tambores Vacíos (Préstamo)
+                </label>
+                
+                {distribucionForm.hasVacios && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Tipo Tambor</label>
+                      <select 
+                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
+                        value={distribucionForm.tipoTambor}
+                        onChange={e => setDistribucionForm({ ...distribucionForm, tipoTambor: e.target.value })}
+                      >
+                        <option value="TRR">TRR (Nuevo Reacondicionado)</option>
+                        <option value="TNA">TNA (Chapa Nueva)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cantidad</label>
+                      <input 
+                        type="number" required min="1"
+                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                        value={distribucionForm.vaciosQty}
+                        onChange={e => setDistribucionForm({ ...distribucionForm, vaciosQty: parseInt(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Observaciones / Notas</label>
-                <input 
-                  type="text"
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                  value={newEnvaseForm.obs}
-                  placeholder="Detalle del camión, chofer o remito..."
-                  onChange={e => setNewEnvaseForm({ ...newEnvaseForm, obs: e.target.value })}
-                />
+
+              {/* Checkbox: Azúcar */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: distribucionForm.hasAzucar ? 'rgba(8,32,26,0.02)' : '#FFFFFF' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-title)' }}>
+                  <input 
+                    type="checkbox"
+                    checked={distribucionForm.hasAzucar}
+                    onChange={e => setDistribucionForm({ ...distribucionForm, hasAzucar: e.target.checked })}
+                  />
+                  🍬 Insumo: Azúcar (Alimentación)
+                </label>
+                
+                {distribucionForm.hasAzucar && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cant. Bolsas</label>
+                        <input 
+                          type="number" required min="1"
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                          value={distribucionForm.azucarQty}
+                          onChange={e => setDistribucionForm({ ...distribucionForm, azucarQty: parseInt(e.target.value) })}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Moneda</label>
+                        <select 
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
+                          value={distribucionForm.monedaAzucar}
+                          onChange={e => setDistribucionForm({ ...distribucionForm, monedaAzucar: e.target.value as any })}
+                        >
+                          <option value="ARS">Pesos (ARS)</option>
+                          <option value="USD">Dólares (USD)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Precio Unitario Bolsa</label>
+                      <input 
+                        type="number" required min="0" step="any"
+                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                        value={distribucionForm.precioAzucar}
+                        onChange={e => setDistribucionForm({ ...distribucionForm, precioAzucar: parseFloat(e.target.value) })}
+                      />
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--danger)', fontWeight: 600 }}>
+                      ⚠️ Importe total a debitar de la CC: {(distribucionForm.azucarQty * distribucionForm.precioAzucar).toLocaleString()} {distribucionForm.monedaAzucar}
+                    </span>
+                  </div>
+                )}
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                <button type="button" onClick={() => setShowAddEnvase(false)} style={{ padding: '0.5rem 1rem', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+
+              {/* Checkbox: Cera Estampada */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: distribucionForm.hasCeraEstampada ? 'rgba(8,32,26,0.02)' : '#FFFFFF' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-title)' }}>
+                  <input 
+                    type="checkbox"
+                    checked={distribucionForm.hasCeraEstampada}
+                    onChange={e => setDistribucionForm({ ...distribucionForm, hasCeraEstampada: e.target.checked })}
+                  />
+                  🕯️ Insumo: Cera Estampada
+                </label>
+                
+                {distribucionForm.hasCeraEstampada && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Tipo Cera</label>
+                        <select 
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
+                          value={distribucionForm.tipoCeraEstampada}
+                          onChange={e => setDistribucionForm({ ...distribucionForm, tipoCeraEstampada: e.target.value })}
+                        >
+                          <option value="CE STD">CE STD (Cera Estampada Estándar)</option>
+                          <option value="CE PREM">CE PREM (Cera Estampada Premium)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cantidad (kg)</label>
+                        <input 
+                          type="number" required min="1" step="any"
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                          value={distribucionForm.ceraEstampadaQty}
+                          onChange={e => setDistribucionForm({ ...distribucionForm, ceraEstampadaQty: parseFloat(e.target.value) })}
+                        />
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Moneda</label>
+                        <select 
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
+                          value={distribucionForm.monedaCeraEstampada}
+                          onChange={e => setDistribucionForm({ ...distribucionForm, monedaCeraEstampada: e.target.value as any })}
+                        >
+                          <option value="ARS">Pesos (ARS)</option>
+                          <option value="USD">Dólares (USD)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Precio por kg</label>
+                        <input 
+                          type="number" required min="0" step="any"
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                          value={distribucionForm.precioCeraEstampada}
+                          onChange={e => setDistribucionForm({ ...distribucionForm, precioCeraEstampada: parseFloat(e.target.value) })}
+                        />
+                      </div>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--danger)', fontWeight: 600 }}>
+                      ⚠️ Importe total a debitar de la CC: {(distribucionForm.ceraEstampadaQty * distribucionForm.precioCeraEstampada).toLocaleString()} {distribucionForm.monedaCeraEstampada}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
+                <button type="button" onClick={() => setShowAddDistribucion(false)} style={{ padding: '0.5rem 1rem', border: '1px solid var(--border-color)', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>
                   Cancelar
                 </button>
-                <button type="submit" style={{ padding: '0.5rem 1rem', backgroundColor: 'var(--secondary)', color: '#FFFFFF', borderRadius: '8px', fontWeight: 600 }}>
-                  Confirmar Registro
+                <button type="submit" style={{ padding: '0.5rem 1rem', backgroundColor: 'var(--secondary)', color: '#FFFFFF', borderRadius: '8px', fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+                  Confirmar Distribución
                 </button>
               </div>
             </form>
@@ -4328,90 +4875,7 @@ function App() {
         </div>
       )}
 
-      {/* 5. Modal: Registrar Movimiento de Opérculo / Cera */}
-      {showAddOperculo && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 999, padding: '1rem'
-        }}>
-          <div className="card-premium" style={{ width: '100%', maxWidth: '450px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 800 }}>Registrar Movimiento de Opérculo</h3>
-            
-            <form onSubmit={handleCreateOperculo} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Tipo de Movimiento</label>
-                <select 
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
-                  value={newOperculoForm.tipo}
-                  onChange={e => setNewOperculoForm({ ...newOperculoForm, tipo: e.target.value as any })}
-                >
-                  <option value="ENTREGA_OP">Entrega de Opérculo Bruto (+)</option>
-                  <option value="RETIRO_CERA">Retiro de Cajas de Cera (-)</option>
-                  <option value="AJUSTE">Ajuste de Saldo</option>
-                </select>
-              </div>
 
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Fecha Operación</label>
-                <input 
-                  type="date"
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                  value={newOperculoForm.fecha}
-                  onChange={e => setNewOperculoForm({ ...newOperculoForm, fecha: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>
-                  {newOperculoForm.tipo === 'RETIRO_CERA' ? 'Kilos de Cera Brutos a retirar (ej: 70)' : 'Kilos de Opérculo (Variación)'}
-                </label>
-                <input 
-                  type="number" required min="1" step="any"
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                  value={newOperculoForm.kilos_op}
-                  onChange={e => setNewOperculoForm({ ...newOperculoForm, kilos_op: parseFloat(e.target.value) })}
-                />
-                {newOperculoForm.tipo === 'RETIRO_CERA' && (
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-                    Al retirar cera, se calculará: `-{newOperculoForm.kilos_op} kg / {newOperculoForm.rendimiento_cera} = -{(newOperculoForm.kilos_op / newOperculoForm.rendimiento_cera).toFixed(1)} kg` de opérculo equivalente.
-                  </span>
-                )}
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Rendimiento Cera Estándar</label>
-                <input 
-                  type="number" required step="0.01"
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                  value={newOperculoForm.rendimiento_cera}
-                  onChange={e => setNewOperculoForm({ ...newOperculoForm, rendimiento_cera: parseFloat(e.target.value) })}
-                />
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Descripción / Observaciones</label>
-                <input 
-                  type="text" required
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                  value={newOperculoForm.detalle}
-                  placeholder="Ej. Entrega 443kg Op / Retira 7 cajas cera 3/4..."
-                  onChange={e => setNewOperculoForm({ ...newOperculoForm, detalle: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                <button type="button" onClick={() => setShowAddOperculo(false)} style={{ padding: '0.5rem 1rem', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
-                  Cancelar
-                </button>
-                <button type="submit" style={{ padding: '0.5rem 1rem', backgroundColor: 'var(--secondary)', color: '#FFFFFF', borderRadius: '8px', fontWeight: 600 }}>
-                  Confirmar Registro
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Modal: Edición Rápida y Registro de Notas de Incorporación (Embudo) */}
       {showQuickEditOnboardingModal && (

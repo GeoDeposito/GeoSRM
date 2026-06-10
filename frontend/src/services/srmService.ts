@@ -229,11 +229,11 @@ if (isMockMode) {
   initializeLocalStorageMock();
 }
 
-const getMockData = <T>(key: string): T[] => {
+export const getMockData = <T>(key: string): T[] => {
   return JSON.parse(localStorage.getItem(key) || '[]');
 };
 
-const saveMockData = <T>(key: string, data: T[]) => {
+export const saveMockData = <T>(key: string, data: T[]) => {
   localStorage.setItem(key, JSON.stringify(data));
 };
 
