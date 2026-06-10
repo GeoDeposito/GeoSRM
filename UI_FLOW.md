@@ -1,116 +1,129 @@
 # [UI_FLOW] - Estructura de Pantallas, Componentes y Diseño Frontend
 
-Este documento define la arquitectura de la aplicación frontend de **APICULTOR SRM** construida en Google Project IDX.
+Este documento define la estructura de pantallas, layouts, componentes y estilos de la aplicación frontend de **APICULTOR SRM** para asegurar que el diseño y la experiencia de usuario puedan recrearse de forma idéntica desde cero.
 
 ---
 
-## 1. Propuesta de Estructura de Carpetas (Google IDX - React + TS + Vite)
+## 1. Estructura de Navegación y Vistas
 
-La estructura propuesta organiza la aplicación utilizando un patrón modular orientado a componentes, hooks reutilizables y servicios desacoplados para conectar con Supabase.
+La aplicación está dividida en las siguientes vistas principales controladas por la barra de navegación lateral (Sidebar):
 
-```text
-apicultor_srm/
-├── frontend/
-│   ├── public/
-│   │   └── favicon.ico
-│   ├── src/
-│   │   ├── assets/              # Logotipos de la empresa e iconos decorativos
-│   │   │   └── logo_apicultor.svg
-│   │   ├── components/          # Componentes de UI comunes y reutilizables
-│   │   │   ├── Button/          # Botones interactivos con micro-animaciones
-│   │   │   ├── Card/            # Tarjetas contenedoras de UI (Bordes 16px, sombras suaves)
-│   │   │   ├── Sidebar/         # Panel de navegación principal lateral con perfil de usuario
-│   │   │   ├── StatCard/        # Tarjetas de estadísticas (Kpi) con círculos de progreso
-│   │   │   └── Chart/           # Gráficos analíticos (Torta para cobros, Barras para entregas)
-│   │   ├── context/             # Estados globales
-│   │   │   ├── AuthContext.tsx  # Sesión y roles de Supabase Auth
-│   │   │   └── SRMContext.tsx   # Estado global del apicultor seleccionado en sesión
-│   │   ├── hooks/               # Custom hooks para aislar lógica del componente
-│   │   │   ├── useSupabase.ts   # Conectividad base
-│   │   │   └── useApicultores.ts# Operaciones CRUD y agregaciones de apicultores
-│   │   ├── pages/               # Vistas de página principales
-│   │   │   ├── Dashboard/       # Tablero general 360° (Entregas totales, Saldos en campo)
-│   │   │   ├── Apicultores/     # Lista con filtros de búsqueda por CUIT, Nombre, Localidad
-│   │   │   ├── FichaDetalle/    # Radiografía 360° del Apicultor (Ficha central)
-│   │   │   │   ├── FichaGeneral.tsx   # Datos impositivos e información básica
-│   │   │   │   ├── FichaEntregas.tsx  # Análisis analíticos de miel (Pfund, Humedad, HMF)
-│   │   │   │   ├── FichaEnvases.tsx   # Préstamos/Devoluciones y "Saldo en Campo"
-│   │   │   │   └── FichaCuentaCorriente.tsx # Debe/Haber/Saldos acumulados (ARS/USD)
-│   │   │   └── Login/           # Acceso de usuarios del sistema
-│   │   ├── services/            # Clientes API para Supabase
-│   │   │   ├── supabaseClient.ts
-│   │   │   └── srmService.ts    # Métodos de negocio específicos
-│   │   ├── styles/              # Sistema de diseño con variables CSS nativas
-│   │   │   ├── variables.css    # Paleta de colores Premium Light, tipografía y sombras
-│   │   │   └── index.css        # Reset global y estilos generales
-│   │   ├── types/               # Tipados TypeScript
-│   │   │   └── srm.types.ts     # Interfaces de Apicultores, Entregas, Envases y CuentaCorriente
-│   │   ├── utils/               # Formateadores numéricos, de fecha e impositivos (CUIT)
-│   │   │   └── formatters.ts
-│   │   ├── App.tsx              # Configuración de Router y Layout global
-│   │   └── main.tsx             # Punto de entrada de Vite
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── vite.config.ts
-```
+### A. Dashboard Central
+* **Métricas Principales (KPI Cards)**:
+  * *Volumen Total Acopiado*: Total de Kg netos recibidos.
+  * *Existencia de Envases en Campo*: Balance neto de tambores vacíos prestados vs devueltos.
+  * *Socios VIP (Clase A)*: Cantidad y porcentaje de apicultores Clase A bajo Pareto 80/20.
+  * *Volumen Promedio por Apicultor*: Kilos netos promedio.
+* **Integración SharePoint (TCM)**: Tarjeta destacada con detalles del esquema de sincronización de planillas y el botón interactivo "Sincronizar ahora con SharePoint" (que ejecuta un mock de sincronización reactivo y muestra el wizard interactivo de Power Automate).
+* **Alertas Críticas**: Panel derecho/inferior que evalúa y muestra incidencias operacionales (e.g. lotes con humedad > 18% o HMF > 40, o apicultores con saldo de envases negativo).
+* **Últimos Lotes Recibidos**: Tabla dinámica con las últimas 4 entregas registradas en tiempo real.
+
+### B. Directorio de Apicultores
+* Tabla con el listado completo de apicultores, que permite buscar dinámicamente por nombre, CUIT, RENAPA o localidad.
+* **Columna Categoría 80/20**: Indica si el apicultor es **Clase A (Socio VIP)** o **Clase B** en base a su aporte acumulado.
+* **Acciones**: Botón de "Onboarding" para registrar un nuevo apicultor (autocompleta DNI y busca datos en RENAPA en base al CUIT). Al hacer clic en un apicultor, redirige de forma instantánea a su **Ficha 360°**.
+
+### C. Clasificación Pareto 80/20 (Panel Analítico)
+* Pantalla dedicada que muestra la concentración comercial de Geomiel.
+* **KPIs**: Muestra el Volumen Neto Total, Proveedores Clase A (80% del acopio), Proveedores Clase B (20% del acopio) y la tasa de concentración.
+* **Tabla Pareto**: Apicultores ordenados por volumen neto descendente, detallando su rango, porcentaje individual, porcentaje acumulado y badge representativo. Cada fila es clickeable para abrir la Ficha 360° del apicultor.
 
 ---
 
-## 2. Paleta de Colores y Tokens Visuales (Inspiración Tablero "D. Córdoba")
+## 2. Ficha 360° del Apicultor (Radiografía Técnica y Operaciones)
 
-El diseño de APICULTOR SRM adopta un tema claro premium, de alto contraste visual y limpieza de cuadrícula, heredando la estructura exacta del tablero de control de referencia.
+Al seleccionar un apicultor del directorio o de Pareto, se abre su ficha detallada estructurada en dos columnas:
+
+### Columna Izquierda: Ficha de Perfil y Estadísticas
+1. **Perfil del Apicultor**: Tarjeta compacta (sin avatar ni email mock) que despliega:
+   * Nombre del Apicultor / Razón Social.
+   * Localidad y Provincia (icono `location_on`).
+   * Teléfono (icono `phone`).
+   * CUIT (icono `badge`).
+   * DNI (icono `fingerprint`).
+   * RENAPA (icono `hive`).
+2. **Aporte al Volumen (Pareto 80/20)**: Tarjeta visual que grafica el aporte porcentual del productor y ofrece sugerencias comerciales según su clase (A o B).
+3. **Clasificación de Acopio (Tambores)**: Nueva tarjeta analítica que totaliza las entregas físicas de tambores del apicultor agrupadas por:
+   * *Color*: Miel Clara ($<50\text{ mm Pfund}$) vs. Miel Oscura ($\ge50\text{ mm Pfund}$).
+   * *Tamaño*: Altos ($\ge331\text{ kg}$) vs. Petisos ($\le330\text{ kg}$).
+
+### Columna Derecha: `📊 Detalle de Operaciones y Ficha Técnica`
+Navegación por pestañas (Tabs), por defecto en `'entregas'`:
+1. **Historial de Romaneos (Entregas)**:
+   * Muestra la tabla principal con las transacciones comerciales: Fecha, Operación / Detalle, Documento (extrae números de remitos/facturas en badges estilizados), y montos/cantidades.
+   * **Inline Row Expander**: Al hacer clic en una fila del tipo **"Entrega de Miel"**, esta se expande horizontalmente para desplegar una subtabla con el detalle técnico de cada tambor individual:
+     * Columnas: ID GEO (Nro Tambor), SENASA (Barras EAN), Lote, Peso Bruto, Tara, Peso Neto, Humedad, Color (mm), HMF, Antibiótico.
+     * Muestra debajo de la subtabla las estadísticas específicas de ese romaneo (totales Clara/Oscura y Altos/Petisos del lote).
+2. **Control de Envases**: Detalle cronológico de préstamos y devoluciones de tambores vacíos con el cálculo del Saldo Neto en Campo.
+3. **Cuenta Corriente**: Detalle financiero doble en pesos (ARS) y dólares (USD) con equivalencia en kilos de miel para el balance comercial.
+
+---
+
+## 3. Modales Operativos Unificados
+
+Se reemplazó el registro fragmentado por dos formularios emergentes consolidados:
+
+1. **`+ Registrar Recolección`** (Ingresos):
+   * Permite seleccionar el tipo de producto a recolectar:
+     * **Miel (TCM)**: Registra el romaneo, fecha y el listado de tambores individuales (Pesos bruto/tara, color, humedad, HMF, antibiótico). **Aplica un descuento automático** de la cantidad de tambores entregados del saldo neto en campo del apicultor.
+     * **Opérculo**: Registra kilos brutos y rendimiento de cera estimado.
+     * **Cera de Recupero**: Ingreso directo de cera.
+2. **`- Registrar Distribución`** (Egresos y Préstamos):
+   * Permite seleccionar el tipo de insumo a distribuir/entregar:
+     * **Tambores Vacíos**: Registra préstamo de envases (incrementando el saldo en campo).
+     * **Azúcar**: Registra entrega de bolsas de azúcar como insumo alimenticio (debitando de la cuenta corriente en ARS/USD).
+     * **Cera Estampada**: Registra entrega de cera estampada (debitando de la cuenta corriente).
+
+---
+
+## 4. Estilos y Tokens de Diseño (Vanilla CSS)
 
 ```css
-/* frontend/src/styles/variables.css */
+/* Paleta de Colores y Layout de Referencia */
 :root {
-  /* Fondo general y contenedores */
-  --bg-app: #F8FAFC;           /* Gris pizarra ultra-claro para fondo de pantalla */
-  --bg-card: #FFFFFF;          /* Blanco puro para tarjetas principales */
-  --bg-sidebar: #FFFFFF;       /* Lateral blanco estructurado */
-  --border-color: #E2E8F0;     /* Gris suave para bordes sutiles */
+  --bg-app: #F8FAFC;
+  --bg-card: #FFFFFF;
+  --bg-sidebar: #FFFFFF;
+  --border-color: #E2E8F0;
   
-  /* Colores de Marca y Acentos */
-  --primary: #85E344;          /* Verde lima vibrante (indicadores activos, botones clave) */
+  --primary: #85E344;          /* Verde Lima para elementos activos */
   --primary-dark: #64B82A;
-  
-  --secondary: #054C34;        /* Verde pino profundo (bloques consolidados, balances positivos) */
-  --secondary-light: #D1FAE5;  /* Fondo verde claro para badges */
-  
-  --amber: #D97706;            /* Ámbar de Miel (detalles analíticos, entregas de producto) */
+  --secondary: #054C34;        /* Verde Pino para balances y marca */
+  --secondary-light: #D1FAE5;
+  --amber: #D97706;            /* Honey Amber para miel y detalles analíticos */
   --amber-light: #FEF3C7;
-  
-  --danger: #EF4444;           /* Rojo coral (deudas financieras, alertas de Humedad > 18%) */
+  --danger: #EF4444;           /* Rojo para deudas y alertas críticas */
   --danger-light: #FEE2E2;
   
-  /* Textos */
-  --text-title: #0F172A;       /* Slate 900 para títulos jerárquicos */
-  --text-body: #334155;        /* Slate 700 para lectura y tablas */
-  --text-secondary: #64748B;   /* Slate 500 para descripciones y placeholders */
+  --text-title: #0F172A;
+  --text-body: #334155;
+  --text-secondary: #64748B;
   
-  /* Componentes del Tablero */
-  --radius-premium: 16px;      /* Bordes curvos idénticos al tablero Córdoba */
-  --shadow-subtle: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --radius-premium: 16px;
   --shadow-card: 0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
 }
+
+/* Evitar envoltura de unidades técnicas */
+.nowrap-unit {
+  white-space: nowrap;
+}
+
+/* Estilo para filas clickeables y expandidas */
+tr.clickable-row {
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+tr.clickable-row:hover {
+  background-color: #F8FAFC;
+}
+tr.expanded-row {
+  background-color: #F8FAFC;
+}
+.expanded-detail-container {
+  padding: 16px;
+  background-color: #FFFFFF;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  margin: 8px 0;
+}
 ```
-
----
-
-## 3. Elementos Clave Replicados del Tablero de Referencia
-
-### A. Estructura Lateral (Sidebar)
-* **Logotipo superior**: Marca "APICULTOR SRM - ADMINISTRACIÓN".
-* **Navegación contextual**: Enlace activo destacado con fondo verde lima (`--primary`) y texto oscuro. Botones para Dashboard, Apicultores, Entregas, Envases y Cuenta Corriente.
-* **Badge de Alertas**: Un círculo rojo con el número de incidencias críticas (ej. lotes de miel con exceso de humedad o apicultores con saldo de tambores negativo).
-* **Tarjeta de Usuario (Footer)**: Despliega la foto del operador, nombre ("Operador Apícola") y rol ("ADMINISTRADOR"). Incluye los accesos rápidos a "Cambiar Clave" y "Cerrar Sesión".
-
-### B. Barra de Filtro de Fechas e Interacción
-* **Selector Horizontal**: Botones individuales por día para filtrar rápidamente la visualización comercial o rango personalizado.
-* **Botón de Reporte**: Botón "Imprimir Resumen" con icono de impresora que exporta un PDF limpio y formateado de la ficha actual.
-
-### C. Tarjetas de Indicadores KPI (Circular Progress Badges)
-* Tarjetas rectangulares con bordes curvos (`--radius-premium`), mostrando el total (ej. "Entregados", "Saldo en Campo", "Ingresos Brutos") y un círculo dinámico a la derecha que indica el porcentaje de cumplimiento (usando bordes SVG con `stroke-dasharray`).
-
-### D. Gráficos y Desglose
-* **Desglose analítico**: Sub-tarjetas con bordes de color en la parte superior para separar cobros por Efectivo, Transferencia, Cheque, etc.
-* **Gráfico circular integrado**: Un gráfico de torta dinámico implementado mediante SVG o Recharts para visualizar las proporciones operacionales.
