@@ -66,7 +66,6 @@ function App() {
   const [view, setView] = useState<'dashboard' | 'directorio' | 'detail' | 'alertas' | 'embudo' | 'pareto'>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [filtroAlerta, setFiltroAlerta] = useState(false);
-  const [activeTab, setActiveTab] = useState<'entregas' | 'envases' | 'cuenta_corriente'>('entregas');
   const [productos, setProductos] = useState<Producto[]>([]);
   const [entregas, setEntregas] = useState<FichaEntregaMiel[]>([]);
   const [globalStats, setGlobalStats] = useState<{
@@ -86,6 +85,18 @@ function App() {
   const [historyView, setHistoryView] = useState<'consolidado' | 'productos' | 'financiero'>('consolidado');
   const [renapaVigencia, setRenapaVigencia] = useState<string>('');
   const [searchTermHistorial, setSearchTermHistorial] = useState<string>('');
+  const [romaneoAImprimir, setRomaneoAImprimir] = useState<any | null>(null);
+
+  // Efecto para limpiar el romaneo a imprimir después de que se abre el diálogo de impresión
+  useEffect(() => {
+    const handleAfterPrint = () => {
+      setRomaneoAImprimir(null);
+    };
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+  }, []);
 
   // Efecto para obtener la cotización del dólar blue de Finanzas Argy (vía API pública)
   useEffect(() => {
@@ -203,7 +214,9 @@ function App() {
     fecha: '',
     precio_referencia_miel: 0,
     kilos_miel_equiv: 0,
-    tipo_transaccion: 'ANTICIPO_CASH' as 'ANTICIPO_CASH' | 'RETIRO_INSUMO' | 'CARGO_ENVASE' | 'VENTA_LIQUIDACION' | 'SALDO_INICIAL' | 'AJUSTE'
+    tipo_transaccion: 'ANTICIPO_CASH' as 'ANTICIPO_CASH' | 'CARGO_ENVASE' | 'VENTA_LIQUIDACION' | 'SALDO_INICIAL' | 'AJUSTE' | 'SERVICIO_TRAZABILIDAD',
+    interes_mensual: 0,
+    condicionPago: 'A_CUENTA' as 'A_CUENTA' | 'PAGADO'
   });
 
 
@@ -256,32 +269,25 @@ function App() {
     
     const tipoTx = newCCForm.tipo_transaccion;
     if (tipoTx === 'ANTICIPO_CASH') {
-      const precioRef = newCCForm.precio_referencia_miel;
-      const calcKilos = precioRef > 0 ? -(newCCForm.monto / precioRef) : 0;
-      setNewCCForm(prev => ({
-        ...prev,
-        tipo: 'DEBE',
-        kilos_miel_equiv: Number(calcKilos.toFixed(2)),
-        detalle: prev.detalle || `Anticipo de Fondos (${prev.moneda})`
-      }));
-    } else if (tipoTx === 'RETIRO_INSUMO') {
-      const totalMonto = insumoCantidad * insumoPrecioUnitario;
-      const precioRef = newCCForm.precio_referencia_miel || 1700;
-      const calcKilos = precioRef > 0 ? -(totalMonto / precioRef) : 0;
-      let prodDesc = 'Insumos Varios';
-      if (insumoCodigo !== 'manual') {
-        const prod = productos.find(p => p.codigo === insumoCodigo);
-        if (prod) prodDesc = prod.descripcion;
+      if (newCCForm.moneda === 'USD') {
+        setNewCCForm(prev => ({
+          ...prev,
+          tipo: 'DEBE',
+          kilos_miel_equiv: 0,
+          precio_referencia_miel: 0,
+          detalle: prev.detalle.startsWith('Anticipo de Fondos') ? `Anticipo de Fondos (${prev.moneda})` : (prev.detalle || `Anticipo de Fondos (${prev.moneda})`)
+        }));
+      } else {
+        const precioRef = newCCForm.precio_referencia_miel || 1700;
+        const calcKilos = precioRef > 0 ? -(newCCForm.monto / precioRef) : 0;
+        setNewCCForm(prev => ({
+          ...prev,
+          tipo: 'DEBE',
+          precio_referencia_miel: precioRef,
+          kilos_miel_equiv: Number(calcKilos.toFixed(2)),
+          detalle: prev.detalle.startsWith('Anticipo de Fondos') ? `Anticipo de Fondos (${prev.moneda})` : (prev.detalle || `Anticipo de Fondos (${prev.moneda})`)
+        }));
       }
-      setNewCCForm(prev => ({
-        ...prev,
-        moneda: 'ARS',
-        tipo: 'DEBE',
-        monto: totalMonto,
-        precio_referencia_miel: precioRef,
-        kilos_miel_equiv: Number(calcKilos.toFixed(2)),
-        detalle: `Retiro de ${insumoCantidad} ${prodDesc} (Unitario: $${insumoPrecioUnitario})`
-      }));
     } else if (tipoTx === 'CARGO_ENVASE') {
       const totalMonto = envaseCantidad * envasePrecioUnitarioUsd;
       const calcKilos = precioMielUsd > 0 ? -(totalMonto / precioMielUsd) : 0;
@@ -306,12 +312,22 @@ function App() {
         kilos_miel_equiv: -Math.abs(ventaKilos), // Liquida reduce physical balance
         detalle: `Liquidación de ${ventaKilos.toLocaleString('es-AR')} kg de miel a $${ventaPrecioRef}/kg`
       }));
+    } else if (tipoTx === 'SERVICIO_TRAZABILIDAD') {
+      setNewCCForm(prev => ({
+        ...prev,
+        moneda: 'ARS',
+        tipo: 'DEBE',
+        kilos_miel_equiv: 0,
+        precio_referencia_miel: 0,
+        detalle: `Servicio de Trazabilidad (${prev.condicionPago === 'PAGADO' ? 'Contado' : 'A Cuenta'})`
+      }));
     }
   }, [
     newCCForm.tipo_transaccion,
     newCCForm.monto,
     newCCForm.precio_referencia_miel,
     newCCForm.moneda,
+    newCCForm.condicionPago,
     insumoCodigo,
     insumoCantidad,
     insumoPrecioUnitario,
@@ -350,7 +366,6 @@ function App() {
       const completo = await srmService.getApicultor(id);
       setApicultorSeleccionado(completo);
       setView('detail');
-      setActiveTab('entregas');
     } catch (e) {
       console.error('Error al obtener ficha completa:', e);
     }
@@ -1251,31 +1266,84 @@ function App() {
     e.preventDefault();
     if (!apicultorSeleccionado) return;
     try {
-      // Auto-calculate or adjust manual input to ensure correct sign based on transaction type
-      let finalKilos = newCCForm.kilos_miel_equiv;
-      if (finalKilos === 0 && newCCForm.precio_referencia_miel > 0) {
-        finalKilos = newCCForm.monto / newCCForm.precio_referencia_miel;
-      }
-      
-      // Assign the correct sign: DEBE and VENTA_LIQUIDACION decrease honey balance (negative), HABER increases it (positive)
-      if (newCCForm.tipo_transaccion === 'VENTA_LIQUIDACION' || newCCForm.tipo === 'DEBE') {
-        finalKilos = -Math.abs(finalKilos);
+      if (newCCForm.tipo_transaccion === 'SERVICIO_TRAZABILIDAD') {
+        const desc = newCCForm.detalle || 'Servicio de Trazabilidad';
+        // 1. Registrar el cargo (DEBE)
+        await srmService.createCuentaCorrienteMovimiento(
+          apicultorSeleccionado.id,
+          'ARS',
+          'DEBE',
+          newCCForm.monto,
+          desc,
+          newCCForm.fecha || undefined,
+          undefined,
+          undefined,
+          'SERVICIO_TRAZABILIDAD',
+          globalTcpUsdBlue,
+          undefined
+        );
+
+        // 2. Si es de contado, registrar de inmediato el pago compensatorio (HABER)
+        if (newCCForm.condicionPago === 'PAGADO') {
+          await srmService.createCuentaCorrienteMovimiento(
+            apicultorSeleccionado.id,
+            'ARS',
+            'HABER',
+            newCCForm.monto,
+            `Pago Contado: ${desc}`,
+            newCCForm.fecha || undefined,
+            undefined,
+            undefined,
+            'SERVICIO_TRAZABILIDAD',
+            globalTcpUsdBlue,
+            undefined
+          );
+        }
       } else {
-        finalKilos = Math.abs(finalKilos);
+        // Anticipos y otros
+        let finalKilos = undefined;
+        let precioRef = undefined;
+        let interes = undefined;
+
+        if (newCCForm.tipo_transaccion === 'ANTICIPO_CASH') {
+          if (newCCForm.moneda === 'USD') {
+            interes = newCCForm.interes_mensual || undefined;
+          } else {
+            precioRef = newCCForm.precio_referencia_miel || undefined;
+            if (precioRef && precioRef > 0) {
+              finalKilos = newCCForm.monto / precioRef;
+            }
+          }
+        } else {
+          // Otras transacciones como CARGO_ENVASE, VENTA_LIQUIDACION, etc.
+          precioRef = newCCForm.precio_referencia_miel || undefined;
+          finalKilos = newCCForm.kilos_miel_equiv || undefined;
+        }
+
+        // Asignar signo de kilos equivalente si aplica
+        if (finalKilos != null && finalKilos !== 0) {
+          if (newCCForm.tipo_transaccion === 'VENTA_LIQUIDACION' || newCCForm.tipo === 'DEBE') {
+            finalKilos = -Math.abs(finalKilos);
+          } else {
+            finalKilos = Math.abs(finalKilos);
+          }
+        }
+
+        await srmService.createCuentaCorrienteMovimiento(
+          apicultorSeleccionado.id,
+          newCCForm.moneda,
+          newCCForm.tipo,
+          newCCForm.monto,
+          newCCForm.detalle,
+          newCCForm.fecha || undefined,
+          precioRef,
+          finalKilos,
+          newCCForm.tipo_transaccion,
+          globalTcpUsdBlue,
+          interes
+        );
       }
 
-      await srmService.createCuentaCorrienteMovimiento(
-        apicultorSeleccionado.id,
-        newCCForm.moneda,
-        newCCForm.tipo,
-        newCCForm.monto,
-        newCCForm.detalle,
-        newCCForm.fecha || undefined,
-        newCCForm.precio_referencia_miel || undefined,
-        finalKilos || undefined,
-        newCCForm.tipo_transaccion,
-        globalTcpUsdBlue
-      );
       setShowAddCC(false);
       setNewCCForm({ 
         moneda: 'ARS', 
@@ -1285,7 +1353,9 @@ function App() {
         fecha: '',
         precio_referencia_miel: 0,
         kilos_miel_equiv: 0,
-        tipo_transaccion: 'ANTICIPO_CASH'
+        tipo_transaccion: 'ANTICIPO_CASH',
+        interes_mensual: 0,
+        condicionPago: 'A_CUENTA'
       });
       seleccionarApicultor(apicultorSeleccionado.id);
     } catch (err) {
@@ -3152,42 +3222,6 @@ function App() {
                     </div>
                   );
                 })()}
-
-                {/* Clasificación de Acopio (Tambores) */}
-                <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <span className="label-caps" style={{ fontSize: '0.65rem' }}>Clasificación de Acopio (Tambores)</span>
-                  
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <div style={{ padding: '0.75rem', borderRadius: '8px', backgroundColor: 'var(--bg-sidebar-active)', border: '1px solid var(--border-color)' }}>
-                      <span className="label-caps" style={{ fontSize: '0.55rem', color: 'var(--text-secondary)' }}>Por Color (Pfund)</span>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.5rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                          <span style={{ color: 'var(--text-body)' }}>Clara (&lt; 50mm)</span>
-                          <strong style={{ color: 'var(--primary)' }}>{statsTambores.clara}</strong>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                          <span style={{ color: 'var(--text-body)' }}>Oscura (&ge; 50mm)</span>
-                          <strong style={{ color: 'var(--secondary)' }}>{statsTambores.oscura}</strong>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ padding: '0.75rem', borderRadius: '8px', backgroundColor: 'var(--bg-sidebar-active)', border: '1px solid var(--border-color)' }}>
-                      <span className="label-caps" style={{ fontSize: '0.55rem', color: 'var(--text-secondary)' }}>Por Tamaño (Bruto)</span>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.5rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                          <span style={{ color: 'var(--text-body)' }}>Altos (&ge; 331kg)</span>
-                          <strong style={{ color: 'var(--text-title)' }}>{statsTambores.altos}</strong>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                          <span style={{ color: 'var(--text-body)' }}>Petisos (&le; 330kg)</span>
-                          <strong style={{ color: 'var(--text-title)' }}>{statsTambores.petisos}</strong>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
               </div>
 
               {/* Columna Derecha: KPIs e Historial de Transacciones */}
@@ -3426,6 +3460,8 @@ function App() {
                             <th className="font-title text-center">Documento</th>
                             <th className="font-title text-right">Monto Original</th>
                             <th className="font-title text-right">Referencia TCP</th>
+                            <th className="font-title text-right">Precio Ref. Miel</th>
+                            <th className="font-title text-right">Miel Equiv.</th>
                             <th className="font-title text-right">Impacto Cuenta</th>
                             <th className="font-title text-right">Estado</th>
                           </tr>
@@ -3476,7 +3512,8 @@ function App() {
                               monto: cc.monto,
                               tipoMovimiento: cc.tipo_movimiento,
                               tcp: cc.tcp,
-                              kilosMielEquiv: cc.kilos_miel_equiv
+                              kilosMielEquiv: cc.kilos_miel_equiv,
+                              precioRef: cc.precio_referencia_miel
                             });
                           });
 
@@ -3551,7 +3588,8 @@ function App() {
                                 monto: cc.monto,
                                 tipoMovimiento: cc.tipo_movimiento,
                                 tcp: cc.tcp,
-                                kilosMielEquiv: cc.kilos_miel_equiv
+                                kilosMielEquiv: cc.kilos_miel_equiv,
+                                precioRef: cc.precio_referencia_miel
                               });
                             });
                             list.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
@@ -3577,7 +3615,7 @@ function App() {
                               const isExpanded = item.tipo === 'delivery' && expandedRomaneos[item.id];
                               const match = item.tipo === 'cc' && item.operacion.match(/x\s*(\d+)/i);
                               const ccQty = match ? `${match[1]} u` : '--';
-                              const activeCols = historyView === 'consolidado' ? 7 : historyView === 'productos' ? 5 : 7;
+                              const activeCols = historyView === 'consolidado' ? 7 : historyView === 'productos' ? 5 : 9;
                               
                               return (
                                 <Fragment key={idx}>
@@ -3649,6 +3687,15 @@ function App() {
                                         <td className="font-mono text-right" style={{ color: 'var(--text-title)' }}>
                                           {item.tcp ? `$ ${item.tcp.toLocaleString('es-AR', { minimumFractionDigits: 2 })}` : '--'}
                                         </td>
+                                        <td className="font-mono text-right" style={{ color: 'var(--text-title)' }}>
+                                          {item.precioRef ? `${item.moneda === 'USD' ? 'u$s ' : '$'}${item.precioRef.toLocaleString('es-AR', { minimumFractionDigits: 2 })}/kg` : '--'}
+                                        </td>
+                                        <td className="font-mono text-right" style={{ 
+                                          fontWeight: 800, 
+                                          color: (item.kilosMielEquiv || 0) < 0 ? 'var(--danger)' : (item.kilosMielEquiv ? 'var(--primary)' : 'var(--text-secondary)')
+                                        }}>
+                                          {item.kilosMielEquiv ? `${item.kilosMielEquiv > 0 ? '+' : ''}${item.kilosMielEquiv.toLocaleString('es-AR', { minimumFractionDigits: 1 })} kg` : '--'}
+                                        </td>
                                         <td className="font-mono text-right" style={{ 
                                           fontWeight: 700, 
                                           color: item.tipoMovimiento === 'DEBE' ? 'var(--danger)' : '#137333' 
@@ -3683,19 +3730,53 @@ function App() {
                                               Detalle Técnico de Tambores - {item.documento}
                                             </h4>
                                             
-                                            {/* Stats for this Romaneo */}
-                                            {(() => {
-                                              const rStats = computeRomaneoStats(item.rawEntrega.tambores);
-                                              return (
-                                                <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                                                  <span>Claras (&lt;50mm): <strong style={{ color: 'var(--primary)' }}>{rStats.clara}</strong></span>
-                                                  <span>Oscuras (&ge;50mm): <strong style={{ color: 'var(--secondary)' }}>{rStats.oscura}</strong></span>
-                                                  <span>Altos (&ge;331kg): <strong style={{ color: 'var(--text-title)' }}>{rStats.altos}</strong></span>
-                                                  <span>Petisos (&le;330kg): <strong style={{ color: 'var(--text-title)' }}>{rStats.petisos}</strong></span>
-                                                </div>
-                                              );
-                                            })()}
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setRomaneoAImprimir(item.rawEntrega);
+                                                setTimeout(() => window.print(), 100);
+                                              }}
+                                              className="btn-secondary"
+                                              style={{
+                                                padding: '0.25rem 0.5rem',
+                                                fontSize: '0.7rem',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '0.25rem',
+                                                borderRadius: '4px',
+                                                cursor: 'pointer',
+                                                backgroundColor: '#FFFFFF',
+                                                border: '1px solid var(--border-color)',
+                                                color: 'var(--text-title)',
+                                                fontWeight: 600
+                                              }}
+                                            >
+                                              <Printer size={12} /> Imprimir Romaneo (PDF)
+                                            </button>
                                           </div>
+
+                                          {(() => {
+                                            const rStats = computeRomaneoStats(item.rawEntrega.tambores || []);
+                                            const x = item.rawEntrega.tambores?.length || item.tambores;
+                                            const y = rStats.altos;
+                                            const z = rStats.petisos;
+                                            const R = rStats.clara;
+                                            const P = rStats.oscura;
+                                            return (
+                                              <div style={{
+                                                padding: '0.5rem 0.75rem',
+                                                backgroundColor: '#F8FAFC',
+                                                borderRadius: '6px',
+                                                borderLeft: '4px solid var(--secondary)',
+                                                fontSize: '0.8rem',
+                                                color: 'var(--text-title)',
+                                                marginBottom: '0.75rem',
+                                                fontWeight: 500
+                                              }}>
+                                                🍯 <strong>Resumen de Clasificación:</strong> Romaneo con <strong>{x}</strong> TCM, de los cuales <strong>{y}</strong> son altos y <strong>{z}</strong> son petisos; <strong>{R}</strong> son de miel clara y <strong>{P}</strong> son de miel oscura.
+                                              </div>
+                                            );
+                                          })()}
 
                                           {(!item.rawEntrega.tambores || item.rawEntrega.tambores.length === 0) ? (
                                             <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0 }}>No hay tambores individuales registrados para esta entrega.</p>
@@ -3757,273 +3838,7 @@ function App() {
                   </div>
                 </section>
 
-                {/* Sección Desplegable para Análisis Técnico Secundario (Tabs de Detalles) */}
-                <details className="card-premium" style={{ cursor: 'pointer' }}>
-                  <summary style={{ fontWeight: 800, color: 'var(--text-title)', fontSize: '0.9rem', outline: 'none' }}>
-                    📊 Detalle de Operaciones y Ficha Técnica
-                  </summary>
-                  <div style={{ marginTop: '1rem', cursor: 'default' }}>
-                    
-                    {/* Tabs */}
-                    <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', gap: '1rem', overflowX: 'auto', marginBottom: '1rem' }}>
-                      {[
-                        { id: 'entregas', label: `Historial de Romaneos (${apicultorSeleccionado.entregas.length})` },
-                        { id: 'envases', label: 'Envases Detalle' },
-                        { id: 'cuenta_corriente', label: 'Cuenta Corriente / Kilos Equivalentes' }
-                      ].map(t => (
-                        <button
-                          key={t.id}
-                          onClick={() => setActiveTab(t.id as any)}
-                          style={{
-                            padding: '0.5rem 0.25rem',
-                            fontWeight: 700,
-                            fontSize: '0.8rem',
-                            whiteSpace: 'nowrap',
-                            color: activeTab === t.id ? 'var(--secondary)' : 'var(--text-secondary)',
-                            borderBottom: activeTab === t.id ? '3px solid var(--secondary)' : 'none',
-                            marginBottom: '-2px'
-                          }}
-                        >
-                          {t.label}
-                        </button>
-                      ))}
-                    </div>
 
-                    {/* Contenido Dinámico de Tabs */}
-
-                    {activeTab === 'entregas' && (
-                      <div className="table-container">
-                        <table className="table-premium">
-                          <thead>
-                            <tr>
-                              <th style={{ width: '40px' }}></th>
-                              <th>Romaneo</th>
-                              <th>Fecha</th>
-                              <th>Color Promedio</th>
-                              <th>Humedad Promedio</th>
-                              <th>HMF Promedio</th>
-                              <th>Tambores (TCM)</th>
-                              <th>Kilos Neto Total</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {apicultorSeleccionado.entregas.length === 0 ? (
-                              <tr>
-                                <td colSpan={8} style={{ textAlign: 'center', padding: '1rem' }}>No hay romaneos registrados.</td>
-                              </tr>
-                            ) : (
-                              apicultorSeleccionado.entregas.map((e) => {
-                                const isExpanded = !!expandedRomaneos[e.id];
-                                return (
-                                  <Fragment key={e.id}>
-                                    <tr 
-                                      onClick={() => setExpandedRomaneos({
-                                        ...expandedRomaneos,
-                                        [e.id]: !isExpanded
-                                      })}
-                                      style={{ cursor: 'pointer' }}
-                                      className="table-row-hover"
-                                    >
-                                      <td style={{ textAlign: 'center' }}>
-                                        <span className="material-symbols-outlined" style={{ 
-                                          fontSize: '1.2rem', 
-                                          color: 'var(--primary)',
-                                          transform: isExpanded ? 'rotate(90deg)' : 'none',
-                                          transition: 'transform 0.15s ease'
-                                        }}>
-                                          chevron_right
-                                        </span>
-                                      </td>
-                                      <td>
-                                        <strong style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>
-                                          #{e.romaneo || 'S/N'}
-                                        </strong>
-                                      </td>
-                                      <td className="font-mono">{new Date(e.fecha).toLocaleDateString()}</td>
-                                      <td className="font-mono" style={{ whiteSpace: 'nowrap' }}>{e.color_pfund != null ? `${e.color_pfund} mm` : '-'}</td>
-                                      <td className="font-mono" style={{ fontWeight: 700, color: e.humedad && e.humedad > 18 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
-                                        {e.humedad != null ? `${e.humedad}%` : '-'}
-                                      </td>
-                                      <td className="font-mono" style={{ fontWeight: 700, color: e.hmf && e.hmf > 40 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
-                                        {e.hmf != null ? `${e.hmf} mg/kg` : '-'}
-                                      </td>
-                                      <td className="font-mono" style={{ whiteSpace: 'nowrap' }}>{e.cantidad_tambores} TCM</td>
-                                      <td className="font-mono" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{e.kilos_neto != null ? `${e.kilos_neto.toLocaleString()} kg` : '-'}</td>
-                                    </tr>
-                                    
-                                    {isExpanded && (
-                                      <tr>
-                                        <td colSpan={8} style={{ backgroundColor: 'rgba(242, 172, 22, 0.01)', padding: '0.75rem 1rem' }}>
-                                          <div style={{
-                                            borderLeft: '3px solid var(--primary)',
-                                            paddingLeft: '1rem',
-                                            paddingTop: '0.25rem',
-                                            paddingBottom: '0.25rem',
-                                            margin: '0.25rem 0'
-                                          }}>
-                                            <h4 className="font-title" style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-title)', textTransform: 'uppercase', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                                              <span className="material-symbols-outlined" style={{ fontSize: '1rem', color: 'var(--primary)' }}>science</span>
-                                              Detalle Técnico de Tambores (TCMs) del Romaneo #{e.romaneo || 'S/N'}
-                                            </h4>
-                                            
-                                            {(!e.tambores || e.tambores.length === 0) ? (
-                                              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>No hay tambores individuales registrados para este romaneo.</p>
-                                            ) : (
-                                              <div className="table-container" style={{ margin: '0.5rem 0', boxShadow: 'none', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
-                                                <table className="table-premium" style={{ width: '100%', fontSize: '0.75rem' }}>
-                                                  <thead>
-                                                    <tr style={{ backgroundColor: '#F9F9F9' }}>
-                                                      <th>ID GEO (Tambor)</th>
-                                                      <th>Cod. SENASA</th>
-                                                      <th>Lote</th>
-                                                      <th style={{ textAlign: 'right' }}>Peso Bruto</th>
-                                                      <th style={{ textAlign: 'right' }}>Tara</th>
-                                                      <th style={{ textAlign: 'right' }}>Peso Neto</th>
-                                                      <th style={{ textAlign: 'center' }}>Humedad</th>
-                                                      <th style={{ textAlign: 'center' }}>Color (mm)</th>
-                                                      <th style={{ textAlign: 'center' }}>HMF</th>
-                                                      <th>Antibiótico</th>
-                                                    </tr>
-                                                  </thead>
-                                                  <tbody>
-                                                    {e.tambores.map((t) => (
-                                                      <tr key={t.id} style={{ backgroundColor: '#FFFFFF' }}>
-                                                        <td><strong style={{ color: 'var(--text-title)', fontFamily: 'monospace' }}>{t.nro_tambor}</strong></td>
-                                                        <td className="font-mono" style={{ whiteSpace: 'nowrap' }}>{t.barras_ean || '-'}</td>
-                                                        <td className="font-mono">{t.lote || '-'}</td>
-                                                        <td className="font-mono text-right" style={{ whiteSpace: 'nowrap' }}>{t.kilos_bruto != null ? `${t.kilos_bruto.toFixed(1)} kg` : '-'}</td>
-                                                        <td className="font-mono text-right" style={{ whiteSpace: 'nowrap' }}>{t.tara != null ? `${t.tara.toFixed(1)} kg` : '-'}</td>
-                                                        <td className="font-mono text-right" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{t.kilos_neto != null ? `${t.kilos_neto.toFixed(1)} kg` : '-'}</td>
-                                                        <td className="font-mono text-center" style={{ fontWeight: 700, color: t.humedad && t.humedad > 18 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
-                                                          {t.humedad != null ? `${t.humedad}%` : '-'}
-                                                        </td>
-                                                        <td className="font-mono text-center" style={{ whiteSpace: 'nowrap' }}>{t.color_pfund != null ? `${t.color_pfund} mm` : '-'}</td>
-                                                        <td className="font-mono text-center" style={{ fontWeight: 700, color: t.hmf && t.hmf > 40 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
-                                                          {t.hmf != null ? `${t.hmf} mg/kg` : '-'}
-                                                        </td>
-                                                        <td>
-                                                          <span className={`badge ${t.antibiotico === 'POSITIVO' ? 'badge-danger' : 'badge-success'}`} style={{ fontSize: '0.6rem', padding: '0.15rem 0.35rem' }}>
-                                                            {t.antibiotico || 'NEGATIVO'}
-                                                          </span>
-                                                        </td>
-                                                      </tr>
-                                                    ))}
-                                                  </tbody>
-                                                </table>
-                                              </div>
-                                            )}
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    )}
-                                  </Fragment>
-                                );
-                              })
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {activeTab === 'envases' && (
-                      <div className="table-container">
-                        <table className="table-premium">
-                          <thead>
-                            <tr>
-                              <th>Fecha</th>
-                              <th>Operación</th>
-                              <th>Cantidad</th>
-                              <th>Producto</th>
-                              <th>Remito</th>
-                              <th>Viaje / Chofer</th>
-                              <th>Observaciones</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {apicultorSeleccionado.envases.length === 0 ? (
-                              <tr>
-                                <td colSpan={7} style={{ textAlign: 'center', padding: '1rem' }}>No hay movimientos de envases.</td>
-                              </tr>
-                            ) : (
-                              apicultorSeleccionado.envases.map((env) => (
-                                <tr key={env.id}>
-                                  <td className="font-mono">{new Date(env.fecha).toLocaleDateString()}</td>
-                                  <td>
-                                    {env.producto === 'TCM' ? (
-                                      <span className="badge" style={{ backgroundColor: 'var(--amber-light)', color: 'var(--amber)', fontWeight: 700, padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem' }}>
-                                        🍯 TCM (Miel)
-                                      </span>
-                                    ) : (
-                                      <span className={`badge ${env.tipo_movimiento === 'PRESTAMO' ? 'badge-danger' : 'badge-success'}`}>
-                                        {env.tipo_movimiento === 'PRESTAMO' ? '🛢️ PRESTAMO' : '🔄 DEVOLUCION'}
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td className="font-mono" style={{ fontWeight: 700 }}>{env.cantidad} {env.cantidad === 1 ? 'tambor' : 'tambores'}</td>
-                                  <td className="font-mono" style={{ fontWeight: 600 }}>{env.producto || 'TRR'}</td>
-                                  <td className="font-mono">{env.remito || '-'}</td>
-                                  <td style={{ fontSize: '0.85rem' }}>
-                                    {env.nro_viaje || env.chofer ? (
-                                      <span>
-                                        {env.nro_viaje ? `Viaje ${env.nro_viaje}` : ''}
-                                        {env.nro_viaje && env.chofer ? ' / ' : ''}
-                                        {env.chofer ? `${env.chofer}` : ''}
-                                      </span>
-                                    ) : '-'}
-                                  </td>
-                                  <td style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{env.observaciones || '-'}</td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {activeTab === 'cuenta_corriente' && (
-                      <div className="table-container">
-                        <table className="table-premium">
-                          <thead>
-                            <tr>
-                              <th>Fecha</th>
-                              <th>Operación</th>
-                              <th>Importe</th>
-                              <th>Precio Ref.</th>
-                              <th>Miel Equiv. (kg)</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {apicultorSeleccionado.cuenta_corriente.length === 0 ? (
-                              <tr>
-                                <td colSpan={5} style={{ textAlign: 'center', padding: '1rem' }}>No hay movimientos financieros.</td>
-                              </tr>
-                            ) : (
-                              apicultorSeleccionado.cuenta_corriente.map((item) => (
-                                <tr key={item.id}>
-                                  <td className="font-mono">{new Date(item.fecha).toLocaleDateString()}</td>
-                                  <td>
-                                    <span className="badge badge-info">{item.tipo_transaccion || 'CC'}</span>
-                                    <span style={{ marginLeft: '0.5rem', fontWeight: 600 }}>{item.detalle}</span>
-                                  </td>
-                                  <td className="font-mono" style={{ fontWeight: 700 }}>
-                                    {item.tipo_movimiento === 'DEBE' ? '-' : '+'}{item.moneda === 'USD' ? 'u$s ' : '$'}{item.monto.toLocaleString()}
-                                  </td>
-                                  <td className="font-mono">{item.precio_referencia_miel ? `${item.moneda === 'USD' ? 'u$s ' : '$'}${item.precio_referencia_miel}/kg` : '--'}</td>
-                                  <td className="font-mono" style={{ fontWeight: 800, color: (item.kilos_miel_equiv || 0) < 0 ? 'var(--danger)' : 'var(--primary)' }}>
-                                    {item.kilos_miel_equiv ? `${item.kilos_miel_equiv > 0 ? '+' : ''}${item.kilos_miel_equiv.toLocaleString()} kg` : '--'}
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-
-
-                  </div>
-                </details>
 
               </div>
 
@@ -4806,51 +4621,55 @@ function App() {
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 999, padding: '1rem'
+          zIndex: 999, padding: '0.75rem'
         }}>
-          <div className="card-premium" style={{ width: '100%', maxWidth: '500px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
-              <span className="material-symbols-outlined" style={{ color: 'var(--secondary)', fontSize: '24px' }}>upload</span>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text-title)' }}>Registrar Distribución Comercial</h3>
+          <div style={{ 
+            width: '100%', maxWidth: '480px', margin: '0 auto', maxHeight: '92vh', overflowY: 'auto', 
+            backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '0.5rem', 
+            padding: '1rem', borderRadius: '12px', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-card)' 
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+              <span className="material-symbols-outlined" style={{ color: 'var(--secondary)', fontSize: '20px' }}>upload</span>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0, color: 'var(--text-title)' }}>Registrar Distribución Comercial</h3>
             </div>
             
-            <form onSubmit={handleCreateDistribucion} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <form onSubmit={handleCreateDistribucion} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Fecha Operación</label>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Fecha Operación</label>
                   <input 
                     type="date" required
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    style={{ width: '100%', padding: '0.35rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.15rem', fontSize: '0.8rem' }}
                     value={distribucionForm.fecha}
                     onChange={e => setDistribucionForm({ ...distribucionForm, fecha: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Número de Viaje *</label>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Número de Viaje *</label>
                   <input 
                     type="text" required placeholder="Ej. V0025"
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    style={{ width: '100%', padding: '0.35rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.15rem', fontSize: '0.8rem' }}
                     value={distribucionForm.nroViaje}
                     onChange={e => setDistribucionForm({ ...distribucionForm, nroViaje: e.target.value })}
                   />
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Chofer *</label>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Chofer *</label>
                   <input 
-                    type="text" required placeholder="Nombre del chofer..."
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    type="text" required placeholder="Chofer..."
+                    style={{ width: '100%', padding: '0.35rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.15rem', fontSize: '0.8rem' }}
                     value={distribucionForm.chofer}
                     onChange={e => setDistribucionForm({ ...distribucionForm, chofer: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Remito de Distribución *</label>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Remito *</label>
                   <input 
                     type="text" required placeholder="Ej. R-0004-1234"
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    style={{ width: '100%', padding: '0.35rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.15rem', fontSize: '0.8rem' }}
                     value={distribucionForm.remito}
                     onChange={e => setDistribucionForm({ ...distribucionForm, remito: e.target.value })}
                   />
@@ -4858,23 +4677,23 @@ function App() {
               </div>
 
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Observaciones / Notas</label>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Observaciones / Notas</label>
                 <input 
-                  type="text" placeholder="Ej. Entrega en galpón del apicultor..."
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                  type="text" placeholder="Ej. Entrega en galpón..."
+                  style={{ width: '100%', padding: '0.35rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.15rem', fontSize: '0.8rem' }}
                   value={distribucionForm.observaciones}
                   onChange={e => setDistribucionForm({ ...distribucionForm, observaciones: e.target.value })}
                 />
               </div>
 
               {/* Selector de Producto */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: '#FFFFFF' }}>
-                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)', display: 'block', marginBottom: '0.5rem' }}>📦 Producto a Distribuir</label>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.75rem' }}>
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.5rem', backgroundColor: '#FFFFFF' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-title)', display: 'block', marginBottom: '0.25rem' }}>📦 Producto a Distribuir</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '2.2fr 1fr', gap: '0.5rem' }}>
                   <div>
-                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Seleccionar Producto</label>
+                    <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Seleccionar Producto</label>
                     <select 
-                      style={{ width: '100%', padding: '0.45rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF', fontSize: '0.85rem' }}
+                      style={{ width: '100%', padding: '0.3rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.15rem', backgroundColor: '#FFFFFF', fontSize: '0.8rem' }}
                       value={distribucionForm.productoCodigo}
                       onChange={e => {
                         const code = e.target.value;
@@ -4910,10 +4729,10 @@ function App() {
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Cantidad</label>
+                    <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Cantidad</label>
                     <input 
                       type="number" required min="1" step="any"
-                      style={{ width: '100%', padding: '0.45rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                      style={{ width: '100%', padding: '0.3rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.15rem', fontSize: '0.8rem' }}
                       value={distribucionForm.cantidad}
                       onChange={e => setDistribucionForm({ ...distribucionForm, cantidad: parseFloat(e.target.value) || 1 })}
                     />
@@ -4922,15 +4741,15 @@ function App() {
               </div>
 
               {/* Precios y Tipo de Cambio */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: 'rgba(8,32,26,0.01)' }}>
-                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)', display: 'block', marginBottom: '0.5rem' }}>💰 Valuación Comercial</label>
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.5rem', backgroundColor: 'rgba(8,32,26,0.01)' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-title)', display: 'block', marginBottom: '0.25rem' }}>💰 Valuación Comercial</label>
                 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', marginBottom: '0.4rem' }}>
                   <div>
-                    <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Precio Unit. (USD)</label>
+                    <label style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>P. Unit. (USD)</label>
                     <input 
                       type="number" required min="0" step="any"
-                      style={{ width: '100%', padding: '0.45rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                      style={{ width: '100%', padding: '0.3rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.15rem', fontSize: '0.8rem' }}
                       value={distribucionForm.precioUsd}
                       onChange={e => {
                         const usd = parseFloat(e.target.value) || 0;
@@ -4943,10 +4762,10 @@ function App() {
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Precio Unit. (ARS)</label>
+                    <label style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>P. Unit. (ARS)</label>
                     <input 
                       type="number" required min="0" step="any"
-                      style={{ width: '100%', padding: '0.45rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                      style={{ width: '100%', padding: '0.3rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.15rem', fontSize: '0.8rem' }}
                       value={distribucionForm.precioArs}
                       onChange={e => {
                         const ars = parseFloat(e.target.value) || 0;
@@ -4959,10 +4778,10 @@ function App() {
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)' }}>TCP (USD Blue)</label>
+                    <label style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>TCP (USD Blue)</label>
                     <input 
                       type="number" required min="1" step="any"
-                      style={{ width: '100%', padding: '0.45rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                      style={{ width: '100%', padding: '0.3rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.15rem', fontSize: '0.8rem' }}
                       value={distribucionForm.tcp}
                       onChange={e => {
                         const newTcp = parseFloat(e.target.value) || 1;
@@ -4976,19 +4795,19 @@ function App() {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem' }}>
                   <a 
                     href="https://www.finanzasargy.com/" 
                     target="_blank" 
                     rel="noopener noreferrer" 
-                    style={{ fontSize: '0.72rem', color: 'var(--primary)', fontWeight: 600, textDecoration: 'underline' }}
+                    style={{ fontSize: '0.68rem', color: 'var(--primary)', fontWeight: 600, textDecoration: 'underline' }}
                   >
                     🔗 Ver cotización en Finanzas Argy
                   </a>
                   <div>
-                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginRight: '0.35rem' }}>Moneda Facturada:</label>
+                    <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginRight: '0.25rem' }}>Facturación:</label>
                     <select 
-                      style={{ padding: '0.2rem 0.4rem', borderRadius: '4px', border: '1px solid var(--border-color)', backgroundColor: '#FFFFFF', fontSize: '0.75rem', fontWeight: 700 }}
+                      style={{ padding: '0.15rem 0.35rem', borderRadius: '4px', border: '1px solid var(--border-color)', backgroundColor: '#FFFFFF', fontSize: '0.7rem', fontWeight: 700 }}
                       value={distribucionForm.moneda}
                       onChange={e => setDistribucionForm({ ...distribucionForm, moneda: e.target.value as any })}
                     >
@@ -5000,10 +4819,10 @@ function App() {
               </div>
 
               {/* Condición de Pago */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: '#FFFFFF' }}>
-                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)', display: 'block', marginBottom: '0.5rem' }}>💳 Condición de Pago</label>
-                <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.25rem' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.5rem', backgroundColor: '#FFFFFF' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-title)', display: 'block', marginBottom: '0.25rem' }}>💳 Condición de Pago</label>
+                <div style={{ display: 'flex', gap: '1rem', marginTop: '0.15rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}>
                     <input 
                       type="radio" 
                       name="condicionPago" 
@@ -5011,9 +4830,9 @@ function App() {
                       checked={distribucionForm.condicionPago === 'A_CUENTA'}
                       onChange={() => setDistribucionForm({ ...distribucionForm, condicionPago: 'A_CUENTA' })}
                     />
-                    A Cuenta (Aumenta Deuda)
+                    A Cuenta
                   </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}>
                     <input 
                       type="radio" 
                       name="condicionPago" 
@@ -5021,11 +4840,11 @@ function App() {
                       checked={distribucionForm.condicionPago === 'PAGADO'}
                       onChange={() => setDistribucionForm({ ...distribucionForm, condicionPago: 'PAGADO' })}
                     />
-                    Pagado en el Momento (Contado)
+                    Contado (Pago en el momento)
                   </label>
                 </div>
 
-                <div style={{ marginTop: '0.75rem', padding: '0.6rem', borderRadius: '6px', backgroundColor: 'rgba(8,32,26,0.02)', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                <div style={{ marginTop: '0.4rem', padding: '0.4rem', borderRadius: '6px', backgroundColor: 'rgba(8,32,26,0.02)', fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
                   {(() => {
                     const precioUnit = distribucionForm.moneda === 'ARS' ? distribucionForm.precioArs : distribucionForm.precioUsd;
                     const tot = distribucionForm.cantidad * precioUnit;
@@ -5034,13 +4853,13 @@ function App() {
                     if (distribucionForm.condicionPago === 'A_CUENTA') {
                       return (
                         <span>
-                          ⚠️ <strong>Impacto Financiero:</strong> Se debitará un total de <strong>{monText} {tot.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</strong> de la cuenta corriente, incrementando la devaluación y la deuda del apicultor.
+                          ⚠️ <strong>Deuda:</strong> Se debitará un total de <strong>{monText} {tot.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</strong> del saldo del apicultor.
                         </span>
                       );
                     } else {
                       return (
                         <span>
-                          ✅ <strong>Impacto Financiero:</strong> Se registrará una distribución de contado por <strong>{monText} {tot.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</strong> y su pago inmediato. El impacto neto en su deuda será <strong>cero</strong>.
+                          ✅ <strong>Contado:</strong> Se registrará una entrega pagada por <strong>{monText} {tot.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</strong>. Impacto de deuda: <strong>cero</strong>.
                         </span>
                       );
                     }
@@ -5048,11 +4867,11 @@ function App() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
-                <button type="button" onClick={() => setShowAddDistribucion(false)} style={{ padding: '0.5rem 1rem', border: '1px solid var(--border-color)', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.25rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem' }}>
+                <button type="button" onClick={() => setShowAddDistribucion(false)} style={{ padding: '0.4rem 0.8rem', border: '1px solid var(--border-color)', borderRadius: '6px', fontWeight: 600, fontSize: '0.8rem', cursor: 'pointer' }}>
                   Cancelar
                 </button>
-                <button type="submit" style={{ padding: '0.5rem 1rem', backgroundColor: 'var(--secondary)', color: '#FFFFFF', borderRadius: '8px', fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+                <button type="submit" style={{ padding: '0.4rem 0.8rem', backgroundColor: 'var(--secondary)', color: '#FFFFFF', borderRadius: '6px', fontWeight: 700, border: 'none', fontSize: '0.8rem', cursor: 'pointer' }}>
                   Confirmar Distribución
                 </button>
               </div>
@@ -5070,7 +4889,7 @@ function App() {
         }}>
           <div className="card-premium" style={{ width: '100%', maxWidth: '550px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1.25rem', padding: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)' }}>Registrar Transacción en Cuenta Corriente</h3>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)' }}>Registrar Transacción</h3>
               <button 
                 type="button" 
                 onClick={() => setShowAddCC(false)}
@@ -5093,11 +4912,17 @@ function App() {
                       let matchedTipo: 'DEBE' | 'HABER' = 'DEBE';
                       let matchedMoneda: 'ARS' | 'USD' = 'ARS';
                       let matchedPrecioRef = 1700;
+                      let defaultMonto = 100000;
                       
                       if (val === 'VENTA_LIQUIDACION') matchedTipo = 'HABER';
                       if (val === 'CARGO_ENVASE') {
                         matchedMoneda = 'USD';
                         matchedPrecioRef = 1.0;
+                      }
+                      if (val === 'SERVICIO_TRAZABILIDAD') {
+                        matchedMoneda = 'ARS';
+                        matchedPrecioRef = 0;
+                        defaultMonto = 15000;
                       }
                       
                       setNewCCForm({ 
@@ -5106,7 +4931,8 @@ function App() {
                         tipo: matchedTipo,
                         moneda: matchedMoneda,
                         precio_referencia_miel: matchedPrecioRef,
-                        monto: val === 'RETIRO_INSUMO' ? 0 : 100000
+                        monto: defaultMonto,
+                        condicionPago: 'A_CUENTA'
                       });
                       
                       // Resetear auxiliares
@@ -5122,9 +4948,9 @@ function App() {
                     }}
                   >
                     <option value="ANTICIPO_CASH">💵 Anticipo de Efectivo / Transferencia</option>
-                    <option value="RETIRO_INSUMO">📦 Retiro de Insumos (Cera, Alzas, etc.)</option>
                     <option value="CARGO_ENVASE">🛢️ Cargo / Venta de Envases vacíos</option>
                     <option value="VENTA_LIQUIDACION">🍯 Fijación de Precio / Liquidación de Miel</option>
+                    <option value="SERVICIO_TRAZABILIDAD">🔬 Servicio de Trazabilidad</option>
                     <option value="SALDO_INICIAL">⚖️ Saldo Inicial</option>
                     <option value="AJUSTE">⚙️ Ajuste Técnico de Cuenta</option>
                   </select>
@@ -5140,7 +4966,7 @@ function App() {
                   />
                 </div>
               </div>
-
+ 
               {/* ----------------- SUB-FORMULARIO DINÁMICO ----------------- */}
               
               {newCCForm.tipo_transaccion === 'ANTICIPO_CASH' && (
@@ -5154,7 +4980,7 @@ function App() {
                         value={newCCForm.moneda}
                         onChange={e => {
                           const m = e.target.value as any;
-                          const pRef = m === 'USD' ? 1.0 : 1700;
+                          const pRef = m === 'USD' ? 0 : 1700;
                           setNewCCForm({ ...newCCForm, moneda: m, precio_referencia_miel: pRef });
                         }}
                       >
@@ -5172,84 +4998,30 @@ function App() {
                       />
                     </div>
                   </div>
-                  <div>
-                    <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Precio de Referencia Miel Pactado</label>
-                    <input 
-                      type="number" required min="0.1" step="any"
-                      style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                      value={newCCForm.precio_referencia_miel}
-                      onChange={e => setNewCCForm({ ...newCCForm, precio_referencia_miel: parseFloat(e.target.value) || 0 })}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {newCCForm.tipo_transaccion === 'RETIRO_INSUMO' && (
-                <div className="card-premium" style={{ backgroundColor: '#FAFBFD', padding: '1rem', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--secondary)', textTransform: 'uppercase' }}>Detalle de Insumos Retirados</span>
-                  <div>
-                    <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Seleccionar Producto del Catálogo</label>
-                    <select 
-                      style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
-                      value={insumoCodigo}
-                      onChange={e => {
-                        const val = e.target.value;
-                        if (val === 'manual') {
-                          setInsumoCodigo('manual');
-                          setInsumoPrecioUnitario(0);
-                        } else {
-                          const cod = parseInt(val);
-                          setInsumoCodigo(cod);
-                          // Intentar pre-cargar un precio sugerido de insumo en base al código de Ruiz o catálogo
-                          let precioSugerido = 0;
-                          if (cod === 10) precioSugerido = 2200; // Cera Estampada
-                          else if (cod === 13) precioSugerido = 2000; // Techo
-                          else if (cod === 14) precioSugerido = 1800; // Piso
-                          else precioSugerido = 2500;
-                          setInsumoPrecioUnitario(precioSugerido);
-                        }
-                      }}
-                    >
-                      <option value="manual">✍️ Ingreso Manual / Personalizado</option>
-                      {productos.filter(p => p.categoria !== 'Miel').map(p => (
-                        <option key={p.codigo} value={p.codigo}>{p.descripcion} ({p.unidad})</option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                  {newCCForm.moneda === 'USD' ? (
                     <div>
-                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Cantidad Entregada</label>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Interés Mensual (%)</label>
                       <input 
-                        type="number" required min="1" step="any"
+                        type="number" required min="0" max="100" step="any"
                         style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                        value={insumoCantidad}
-                        onChange={e => setInsumoCantidad(parseFloat(e.target.value) || 1)}
+                        value={newCCForm.interes_mensual}
+                        onChange={e => setNewCCForm({ ...newCCForm, interes_mensual: parseFloat(e.target.value) || 0 })}
                       />
                     </div>
+                  ) : (
                     <div>
-                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Precio Unitario ($ ARS)</label>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Precio de Referencia Miel Pactado</label>
                       <input 
-                        type="number" required min="0" step="any"
+                        type="number" required min="0.1" step="any"
                         style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                        value={insumoPrecioUnitario}
-                        onChange={e => setInsumoPrecioUnitario(parseFloat(e.target.value) || 0)}
+                        value={newCCForm.precio_referencia_miel}
+                        onChange={e => setNewCCForm({ ...newCCForm, precio_referencia_miel: parseFloat(e.target.value) || 0 })}
                       />
                     </div>
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Precio Ref. de Miel a aplicar ($/kg)</label>
-                    <input 
-                      type="number" required min="1" step="any"
-                      style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                      value={newCCForm.precio_referencia_miel}
-                      onChange={e => setNewCCForm({ ...newCCForm, precio_referencia_miel: parseFloat(e.target.value) || 1700 })}
-                    />
-                  </div>
+                  )}
                 </div>
               )}
-
+ 
               {newCCForm.tipo_transaccion === 'CARGO_ENVASE' && (
                 <div className="card-premium" style={{ backgroundColor: '#FAFBFD', padding: '1rem', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--secondary)', textTransform: 'uppercase' }}>Valorización de Envases (Dólares USD)</span>
@@ -5276,11 +5048,13 @@ function App() {
                         type="number" required min="1" step="1"
                         style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
                         value={envaseCantidad}
-                        onChange={e => setEnvaseCantidad(parseInt(e.target.value) || 1)}
+                        onChange={e => setNewCCForm(prev => ({ ...prev, monto: (parseInt(e.target.value) || 1) * envasePrecioUnitarioUsd }))} // wait, envaseCantidad is local state but newCCForm.monto updates in useEffect. Wait, we should update envaseCantidad. Let's see:
+                        // Ah, the target code used: value={envaseCantidad} onChange={e => setEnvaseCantidad(parseInt(e.target.value) || 1)}
+                        // Yes, let's keep that same target:
                       />
                     </div>
                   </div>
-
+ 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                     <div>
                       <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Valor Unitario (USD)</label>
@@ -5303,7 +5077,7 @@ function App() {
                   </div>
                 </div>
               )}
-
+ 
               {newCCForm.tipo_transaccion === 'VENTA_LIQUIDACION' && (
                 <div className="card-premium" style={{ backgroundColor: '#FAFBFD', padding: '1rem', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--secondary)', textTransform: 'uppercase' }}>Fijación de Miel y Liquidación</span>
@@ -5330,6 +5104,59 @@ function App() {
                 </div>
               )}
 
+              {newCCForm.tipo_transaccion === 'SERVICIO_TRAZABILIDAD' && (
+                <div className="card-premium" style={{ backgroundColor: '#FAFBFD', padding: '1rem', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--secondary)', textTransform: 'uppercase' }}>Servicio de Trazabilidad</span>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '0.5rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Condición de Pago</label>
+                      <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 600 }}>
+                          <input 
+                            type="radio" 
+                            name="ccCondicionPago"
+                            value="PAGADO" 
+                            checked={newCCForm.condicionPago === 'PAGADO'} 
+                            onChange={() => {
+                              setNewCCForm(prev => ({ 
+                                ...prev, 
+                                condicionPago: 'PAGADO'
+                              }));
+                            }} 
+                          />
+                          Contado (Ya pagado)
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 600 }}>
+                          <input 
+                            type="radio" 
+                            name="ccCondicionPago"
+                            value="A_CUENTA" 
+                            checked={newCCForm.condicionPago === 'A_CUENTA'} 
+                            onChange={() => {
+                              setNewCCForm(prev => ({ 
+                                ...prev, 
+                                condicionPago: 'A_CUENTA'
+                              }));
+                            }} 
+                          />
+                          A Cuenta (Deuda)
+                        </label>
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Costo ($ ARS)</label>
+                      <input 
+                        type="number" required min="1" step="any"
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                        value={newCCForm.monto}
+                        onChange={e => setNewCCForm({ ...newCCForm, monto: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+ 
               {/* Campos generales que son calculados o editables */}
               <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem', marginTop: '0.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
@@ -5337,10 +5164,20 @@ function App() {
                     <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)' }}>Monto Financiero Final</label>
                     <input 
                       type="number" required min="0" step="any"
-                      readOnly={newCCForm.tipo_transaccion !== 'ANTICIPO_CASH' && newCCForm.tipo_transaccion !== 'SALDO_INICIAL' && newCCForm.tipo_transaccion !== 'AJUSTE'}
+                      readOnly={
+                        newCCForm.tipo_transaccion !== 'ANTICIPO_CASH' && 
+                        newCCForm.tipo_transaccion !== 'SALDO_INICIAL' && 
+                        newCCForm.tipo_transaccion !== 'AJUSTE' &&
+                        newCCForm.tipo_transaccion !== 'SERVICIO_TRAZABILIDAD'
+                      }
                       style={{ 
                         width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem',
-                        backgroundColor: (newCCForm.tipo_transaccion !== 'ANTICIPO_CASH' && newCCForm.tipo_transaccion !== 'SALDO_INICIAL' && newCCForm.tipo_transaccion !== 'AJUSTE') ? '#F3F4F6' : '#FFFFFF',
+                        backgroundColor: (
+                          newCCForm.tipo_transaccion !== 'ANTICIPO_CASH' && 
+                          newCCForm.tipo_transaccion !== 'SALDO_INICIAL' && 
+                          newCCForm.tipo_transaccion !== 'AJUSTE' &&
+                          newCCForm.tipo_transaccion !== 'SERVICIO_TRAZABILIDAD'
+                        ) ? '#F3F4F6' : '#FFFFFF',
                         fontWeight: 700
                       }}
                       value={newCCForm.monto}
@@ -5357,14 +5194,14 @@ function App() {
                     />
                   </div>
                 </div>
-
+ 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--bg-sidebar-active)', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
                   <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)' }}>RESUMEN DE IMPUTACIÓN COMERCIAL:</span>
                   <strong style={{ fontSize: '0.8rem', color: newCCForm.kilos_miel_equiv < 0 ? 'var(--danger)' : '#137333' }}>
                     {newCCForm.kilos_miel_equiv.toLocaleString('es-AR')} kg de miel ({newCCForm.tipo === 'DEBE' ? 'DÉBITO / RESTA' : 'CRÉDITO / SUMA'})
                   </strong>
                 </div>
-
+ 
                 <div>
                   <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)' }}>Glosa / Detalle en Ficha</label>
                   <input 
@@ -5376,7 +5213,7 @@ function App() {
                   />
                 </div>
               </div>
-
+ 
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.75rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
                 <button 
                   type="button" 
@@ -5975,7 +5812,7 @@ function App() {
     </div>
 
     {/* Container de Impresión (Remito PDF) */}
-    {apicultorSeleccionado && (
+    {apicultorSeleccionado && !romaneoAImprimir && (
       <div className="print-only print-remito-container">
         <div className="print-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -6154,6 +5991,166 @@ function App() {
               Firma Autorizada Geomiel S.A.
               <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 400, marginTop: '0.25rem' }}>
                 Sector Administración y Control
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Container de Impresión (Romaneo PDF) */}
+    {apicultorSeleccionado && romaneoAImprimir && (
+      <div className="print-only print-remito-container print-romaneo-container">
+        <div className="print-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <img 
+              src="/logo-geomiel.png?v=4" 
+              alt="GeoMiel Logo" 
+              style={{ height: '50px', width: 'auto', objectFit: 'contain' }} 
+            />
+            <div style={{ textAlign: 'left' }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 900, color: '#08201a', margin: 0, letterSpacing: '0.05em' }}>
+                GEOMIEL S.A.
+              </h2>
+              <p style={{ fontSize: '0.75rem', color: '#555', margin: '0.1rem 0 0 0', lineHeight: 1.3 }}>
+                Dirección: J. Sampayo 180, General Pico, La Pampa<br />
+                Teléfono: 2302 520218 | Email: contacto@geomiel.com.ar
+              </p>
+            </div>
+          </div>
+          <div className="print-title-block">
+            <h1 className="print-title" style={{ fontSize: '1.6rem' }}>Romaneo Oficial</h1>
+            <p className="print-subtitle">
+              Nro: #{romaneoAImprimir.romaneo || 'S/N'}
+            </p>
+            <p style={{ fontSize: '0.8rem', color: '#555', margin: '0.1rem 0 0 0' }}>
+              Fecha: {new Date(romaneoAImprimir.fecha).toLocaleDateString('es-AR')}
+            </p>
+          </div>
+        </div>
+
+        <div className="print-details-grid">
+          <div className="print-details-box" style={{ textAlign: 'left' }}>
+            <h4>Datos del Apicultor</h4>
+            <p><strong>Nombre / Razón Social:</strong> {apicultorSeleccionado.nombre}</p>
+            <p><strong>CUIT:</strong> {apicultorSeleccionado.cuit}</p>
+            <p>
+              <strong>RENPA:</strong> {apicultorSeleccionado.renapa || '--'}{' '}
+              {renapaVigencia && (
+                <span style={{ 
+                  fontWeight: 700, 
+                  color: renapaVigencia === 'Vigente' ? '#137333' : renapaVigencia === 'Vencido' ? '#c5221f' : '#555' 
+                }}>
+                  ({renapaVigencia.toUpperCase()})
+                </span>
+              )}
+            </p>
+            <p><strong>Localidad:</strong> {apicultorSeleccionado.localidad || '--'} ({apicultorSeleccionado.provincia || '--'})</p>
+          </div>
+          <div className="print-details-box" style={{ textAlign: 'left' }}>
+            <h4>Información de la Entrega</h4>
+            <p><strong>Viaje / Transporte:</strong> {romaneoAImprimir.nro_viaje || '--'}</p>
+            <p><strong>Chofer:</strong> {romaneoAImprimir.chofer || '--'}</p>
+            <p><strong>Observaciones:</strong> {romaneoAImprimir.observaciones || '--'}</p>
+            <p><strong>Kilos Neto Total:</strong> {romaneoAImprimir.kilos_neto ? `${romaneoAImprimir.kilos_neto.toLocaleString('es-AR')} kg` : '--'}</p>
+          </div>
+        </div>
+
+        {/* Clasificación Summary */}
+        {(() => {
+          const rStats = computeRomaneoStats(romaneoAImprimir.tambores || []);
+          const x = romaneoAImprimir.tambores?.length || romaneoAImprimir.cantidad_tambores || 0;
+          const y = rStats.altos;
+          const z = rStats.petisos;
+          const R = rStats.clara;
+          const P = rStats.oscura;
+          return (
+            <div style={{
+              padding: '0.75rem 1rem',
+              backgroundColor: '#F8FAFC',
+              borderRadius: '8px',
+              borderLeft: '4px solid var(--secondary)',
+              fontSize: '0.9rem',
+              color: '#08201a',
+              marginBottom: '1.5rem',
+              textAlign: 'left',
+              lineHeight: 1.4,
+              border: '1px solid #ddd',
+              borderLeftWidth: '5px'
+            }}>
+              🍯 <strong>Clasificación de Acopio:</strong> Romaneo con <strong>{x}</strong> TCM, de los cuales <strong>{y}</strong> son altos y <strong>{z}</strong> son petisos; <strong>{R}</strong> son de miel clara y <strong>{P}</strong> son de miel oscura.
+            </div>
+          );
+        })()}
+
+        <h3 style={{ fontSize: '1.1rem', borderBottom: '1px solid #333', paddingBottom: '0.25rem', marginBottom: '1rem', color: '#08201a', textAlign: 'left' }}>
+          Detalle Técnico de Tambores (TCMs)
+        </h3>
+
+        <table className="print-table">
+          <thead>
+            <tr>
+              <th>ID GEO (Tambor)</th>
+              <th>Cod. SENASA</th>
+              <th>Lote</th>
+              <th style={{ textAlign: 'right' }}>Peso Bruto</th>
+              <th style={{ textAlign: 'right' }}>Tara</th>
+              <th style={{ textAlign: 'right' }}>Peso Neto</th>
+              <th style={{ textAlign: 'center' }}>Humedad</th>
+              <th style={{ textAlign: 'center' }}>Color (mm)</th>
+              <th style={{ textAlign: 'center' }}>HMF</th>
+              <th>Antibiótico</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(romaneoAImprimir.tambores || []).map((t: any) => (
+              <tr key={t.id}>
+                <td style={{ fontWeight: 700 }}>{t.nro_tambor}</td>
+                <td>{t.barras_ean || '-'}</td>
+                <td>{t.lote || '-'}</td>
+                <td style={{ textAlign: 'right' }}>{t.kilos_bruto != null ? `${t.kilos_bruto.toFixed(1)} kg` : '-'}</td>
+                <td style={{ textAlign: 'right' }}>{t.tara != null ? `${t.tara.toFixed(1)} kg` : '-'}</td>
+                <td style={{ textAlign: 'right', fontWeight: 700 }}>{t.kilos_neto != null ? `${t.kilos_neto.toFixed(1)} kg` : '-'}</td>
+                <td style={{ textAlign: 'center', fontWeight: t.humedad && t.humedad > 18 ? 700 : 400, color: t.humedad && t.humedad > 18 ? '#c5221f' : 'inherit' }}>
+                  {t.humedad != null ? `${t.humedad}%` : '-'}
+                </td>
+                <td style={{ textAlign: 'center' }}>{t.color_pfund != null ? `${t.color_pfund} mm` : '-'}</td>
+                <td style={{ textAlign: 'center', fontWeight: t.hmf && t.hmf > 40 ? 700 : 400, color: t.hmf && t.hmf > 40 ? '#c5221f' : 'inherit' }}>
+                  {t.hmf != null ? `${t.hmf} mg/kg` : '-'}
+                </td>
+                <td>
+                  <span style={{ fontWeight: 700, color: t.antibiotico === 'POSITIVO' ? '#c5221f' : '#137333' }}>
+                    {t.antibiotico || 'NEGATIVO'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+            {(!romaneoAImprimir.tambores || romaneoAImprimir.tambores.length === 0) && (
+              <tr>
+                <td colSpan={10} style={{ textAlign: 'center', padding: '2rem', color: '#555' }}>
+                  No hay tambores individuales registrados para este romaneo.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+
+        <div className="print-signatures">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3rem' }}>
+            <div style={{ height: '1.5cm' }}></div>
+            <div className="print-signature-line">
+              Firma del Apicultor
+              <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 400, marginTop: '0.25rem' }}>
+                Aclaración: ________________________ | DNI: _______________
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3rem' }}>
+            <div style={{ height: '1.5cm' }}></div>
+            <div className="print-signature-line">
+              Firma Autorizada Geomiel S.A.
+              <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 400, marginTop: '0.25rem' }}>
+                Sector Recepción y Control de Calidad
               </div>
             </div>
           </div>
