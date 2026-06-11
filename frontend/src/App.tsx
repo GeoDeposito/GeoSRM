@@ -400,32 +400,7 @@ function App() {
     return { clara, oscura, altos, petisos };
   };
 
-  // Estadísticas globales de clasificación de tambores para el apicultor seleccionado
-  const statsTambores = useMemo(() => {
-    let clara = 0;
-    let oscura = 0;
-    let altos = 0;
-    let petisos = 0;
 
-    if (!apicultorSeleccionado) {
-      return { clara, oscura, altos, petisos };
-    }
-
-    apicultorSeleccionado.entregas.forEach(e => {
-      (e.tambores || []).forEach(t => {
-        if (t.color_pfund != null) {
-          if (t.color_pfund < 50) clara++;
-          else oscura++;
-        }
-        if (t.kilos_bruto != null) {
-          if (t.kilos_bruto >= 331) altos++;
-          else petisos++;
-        }
-      });
-    });
-
-    return { clara, oscura, altos, petisos };
-  }, [apicultorSeleccionado]);
 
   // Categorización Pareto 80/20 dinámica basada en volumen neto acumulado
   const apicultoresCategorizados = useMemo(() => {
