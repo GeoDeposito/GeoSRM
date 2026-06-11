@@ -55,6 +55,10 @@ export interface FichaControlEnvases {
   fecha: string;
   tipo_movimiento: 'PRESTAMO' | 'DEVOLUCION';
   cantidad: number;
+  producto?: string; // e.g. TRR, TNA, TCM
+  remito?: string;
+  nro_viaje?: string;
+  chofer?: string;
   observaciones?: string;
   created_at: string;
   updated_at: string;
@@ -82,6 +86,8 @@ export interface FichaControlOperculo {
   tipo_movimiento: 'ENTREGA_OP' | 'RETIRO_CERA' | 'AJUSTE';
   kilos_op: number;
   rendimiento_cera: number; // Default 0.8
+  nro_viaje?: string;
+  chofer?: string;
   detalle?: string;
   created_at: string;
   updated_at: string;

@@ -601,7 +601,11 @@ export const srmService = {
     tipo_movimiento: 'PRESTAMO' | 'DEVOLUCION',
     cantidad: number,
     observaciones: string,
-    fecha?: string
+    fecha?: string,
+    producto?: string,
+    remito?: string,
+    nro_viaje?: string,
+    chofer?: string
   ): Promise<FichaControlEnvases> {
     const fechaMov = fecha ? new Date(fecha).toISOString() : new Date().toISOString();
 
@@ -613,6 +617,10 @@ export const srmService = {
         fecha: fechaMov,
         tipo_movimiento,
         cantidad,
+        producto: producto || 'TRR',
+        remito,
+        nro_viaje,
+        chofer,
         observaciones,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -624,7 +632,17 @@ export const srmService = {
 
     const { data, error } = await supabase!
       .from('ficha_control_envases')
-      .insert([{ apicultor_id, tipo_movimiento, cantidad, observaciones, fecha: fechaMov }])
+      .insert([{ 
+        apicultor_id, 
+        tipo_movimiento, 
+        cantidad, 
+        observaciones, 
+        fecha: fechaMov,
+        producto: producto || 'TRR',
+        remito,
+        nro_viaje,
+        chofer
+      }])
       .select()
       .single();
     if (error) throw error;
@@ -696,7 +714,9 @@ export const srmService = {
     kilos_op: number,
     rendimiento_cera: number = 0.8,
     detalle?: string,
-    fecha?: string
+    fecha?: string,
+    nro_viaje?: string,
+    chofer?: string
   ): Promise<FichaControlOperculo> {
     const fechaMov = fecha ? new Date(fecha).toISOString() : new Date().toISOString();
 
@@ -709,6 +729,8 @@ export const srmService = {
         tipo_movimiento,
         kilos_op,
         rendimiento_cera,
+        nro_viaje,
+        chofer,
         detalle,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -725,6 +747,8 @@ export const srmService = {
         tipo_movimiento, 
         kilos_op, 
         rendimiento_cera, 
+        nro_viaje,
+        chofer,
         detalle, 
         fecha: fechaMov 
       }])
@@ -746,6 +770,8 @@ export const srmService = {
     // 1. Saldo de Envases en Campo (Préstamos - Devoluciones)
     let saldo_envases = 0;
     envases.forEach(e => {
+      if (e.producto === 'TCM') return; // Excluir tambores con miel
+      
       if (e.tipo_movimiento === 'PRESTAMO') {
         saldo_envases += e.cantidad;
       } else {

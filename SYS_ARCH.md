@@ -65,6 +65,10 @@ create table if not exists public.ficha_control_envases (
     fecha timestamp with time zone default timezone('utc'::text, now()) not null,
     tipo_movimiento text not null check (tipo_movimiento in ('PRESTAMO', 'DEVOLUCION')),
     cantidad integer not null check (cantidad > 0),
+    producto varchar(50) default 'TRR', -- Tipo de tambor (TCM, TRR, TNA, etc.)
+    remito varchar(50), -- Número de remito de entrega/devolución
+    nro_viaje varchar(50), -- Número de viaje / transporte
+    chofer text, -- Nombre del chofer
     observaciones text,
     created_at timestamp with time zone default timezone('utc'::text, now()) not null,
     updated_at timestamp with time zone default timezone('utc'::text, now()) not null
@@ -121,6 +125,8 @@ create table if not exists public.ficha_control_operculo (
     tipo_movimiento text not null check (tipo_movimiento in ('ENTREGA_OP', 'RETIRO_CERA', 'AJUSTE')),
     kilos_op numeric(10, 2) not null, -- Positivo en entregas, negativo en retiros
     rendimiento_cera numeric(3, 2) default 0.80, -- Usualmente 0.80
+    nro_viaje varchar(50), -- Número de viaje / transporte
+    chofer text, -- Nombre del chofer
     detalle text,
     created_at timestamp with time zone default timezone('utc'::text, now()) not null,
     updated_at timestamp with time zone default timezone('utc'::text, now()) not null
@@ -247,11 +253,15 @@ declare
 begin
     select coalesce(sum(cantidad), 0) into prestados
     from public.ficha_control_envases
-    where apicultor_id = apicultor_uuid and tipo_movimiento = 'PRESTAMO';
+    where apicultor_id = apicultor_uuid 
+      and tipo_movimiento = 'PRESTAMO'
+      and coalesce(producto, '') <> 'TCM';
 
     select coalesce(sum(cantidad), 0) into devueltos
     from public.ficha_control_envases
-    where apicultor_id = apicultor_uuid and tipo_movimiento = 'DEVOLUCION';
+    where apicultor_id = apicultor_uuid 
+      and tipo_movimiento = 'DEVOLUCION'
+      and coalesce(producto, '') <> 'TCM';
 
     return prestados - devueltos;
 end;

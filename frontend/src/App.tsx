@@ -125,18 +125,18 @@ function App() {
   });
   const [recoleccionForm, setRecoleccionForm] = useState({
     fecha: new Date().toISOString().substring(0, 10),
+    nroViaje: '',
+    chofer: '',
     observaciones: '',
     hasMiel: false,
-    romaneo: '',
     tamboresQty: 1,
-    kilosNeto: 300,
-    colorPfund: 34,
-    humedad: 17.5,
-    hmf: 12,
-    lote: '',
+    remitoMiel: '',
+    hasVaciosDev: false,
+    tipoTamborDev: 'TRR',
+    vaciosDevQty: 1,
+    remitoVaciosDev: '',
     hasOperculo: false,
     kilosOp: 100,
-    rendimientoCera: 0.8,
     hasRecupero: false,
     kilosRecupero: 50
   });
@@ -998,76 +998,75 @@ function App() {
     if (!apicultorSeleccionado) return;
     try {
       const {
-        fecha, observaciones,
-        hasMiel, romaneo, tamboresQty, kilosNeto, colorPfund, humedad, hmf, lote,
-        hasOperculo, kilosOp, rendimientoCera,
+        fecha, nroViaje, chofer, observaciones,
+        hasMiel, tamboresQty, remitoMiel,
+        hasVaciosDev, tipoTamborDev, vaciosDevQty, remitoVaciosDev,
+        hasOperculo, kilosOp,
         hasRecupero, kilosRecupero
       } = recoleccionForm;
 
-      if (!hasMiel && !hasOperculo && !hasRecupero) {
-        alert('Debe seleccionar al menos una operación (Miel, Opérculo o Recupero).');
+      if (!hasMiel && !hasVaciosDev && !hasOperculo && !hasRecupero) {
+        alert('Debe seleccionar al menos una operación (Miel, Devolución de Vacíos, Opérculo o Recupero).');
         return;
       }
 
-      // 1. Miel (TCM)
+      // 1. Miel (TCM) en campo
       if (hasMiel) {
-        const entrega = await srmService.createEntrega(
-          apicultorSeleccionado.id,
-          colorPfund,
-          humedad,
-          hmf,
-          tamboresQty,
-          kilosNeto,
-          fecha
-        );
-        // Descontar automáticamente envases en campo
+        // La recolección de TCM en campo se registra en control_envases como devolución pero con producto = 'TCM'
+        // No afecta el saldo neto de envases vacíos porque la consulta de saldo los excluye.
         await srmService.createEnvaseMovimiento(
           apicultorSeleccionado.id,
           'DEVOLUCION',
           tamboresQty,
-          `Descuento por Miel Recolectada (Romaneo: #${romaneo || 'S/N'}, Lote: ${lote || 'N/A'})`,
-          fecha
+          observaciones || 'Retiro TCM en Campo (Pendiente de Romaneo)',
+          fecha,
+          'TCM',
+          remitoMiel,
+          nroViaje,
+          chofer
         );
-        // Crear tambores individuales para el romaneo en el mock db
-        const parsedLote = parseInt(lote) || 13006;
-        const avgBruto = Math.round(kilosNeto / tamboresQty) + 16;
-        for (let i = 0; i < tamboresQty; i++) {
-          await srmService.createEntregaTambor(
-            entrega.id,
-            `TAMB-${Math.floor(100000 + Math.random() * 900000)}`,
-            `18-${Math.floor(10000000 + Math.random() * 90000000)}-${Math.floor(Math.random() * 9)}`,
-            parsedLote,
-            avgBruto,
-            16,
-            colorPfund,
-            humedad,
-            hmf,
-            'NEGATIVO'
-          );
-        }
       }
 
-      // 2. Cera de Opérculo
+      // 2. Devolución de Tambores Vacíos (afecta al saldo)
+      if (hasVaciosDev) {
+        await srmService.createEnvaseMovimiento(
+          apicultorSeleccionado.id,
+          'DEVOLUCION',
+          vaciosDevQty,
+          observaciones || `Devolución de Vacíos (${tipoTamborDev})`,
+          fecha,
+          tipoTamborDev,
+          remitoVaciosDev,
+          nroViaje,
+          chofer
+        );
+      }
+
+      // 3. Cera de Opérculo (Rendimiento 0.8 bajo el capó)
       if (hasOperculo) {
         await srmService.createOperculoMovimiento(
           apicultorSeleccionado.id,
           'ENTREGA_OP',
           kilosOp,
-          rendimientoCera,
-          `Recolección Opérculo (${observaciones || 'Cappings'})`,
-          fecha
+          0.80,
+          observaciones || 'Recolección Opérculo en Campo',
+          fecha,
+          nroViaje,
+          chofer
         );
       }
 
-      // 3. Cera de Recupero
+      // 4. Cera de Recupero (Rendimiento 1.0 bajo el capó)
       if (hasRecupero) {
         await srmService.createOperculoMovimiento(
           apicultorSeleccionado.id,
           'ENTREGA_OP',
           kilosRecupero,
-          1.0, // Rendimiento 1.0 porque es cera pura
-          `Recolección Cera Recupero (${observaciones || 'Pura'})`,
-          fecha
+          1.00,
+          observaciones || 'Recolección Cera Recupero en Campo',
+          fecha,
+          nroViaje,
+          chofer
         );
       }
 
@@ -1075,18 +1074,18 @@ function App() {
       // Reset form
       setRecoleccionForm({
         fecha: new Date().toISOString().substring(0, 10),
+        nroViaje: '',
+        chofer: '',
         observaciones: '',
         hasMiel: false,
-        romaneo: '',
         tamboresQty: 1,
-        kilosNeto: 300,
-        colorPfund: 34,
-        humedad: 17.5,
-        hmf: 12,
-        lote: '',
+        remitoMiel: '',
+        hasVaciosDev: false,
+        tipoTamborDev: 'TRR',
+        vaciosDevQty: 1,
+        remitoVaciosDev: '',
         hasOperculo: false,
         kilosOp: 100,
-        rendimientoCera: 0.8,
         hasRecupero: false,
         kilosRecupero: 50
       });
@@ -1120,7 +1119,8 @@ function App() {
           'PRESTAMO',
           vaciosQty,
           `Préstamo Tambores Vacíos (${tipoTambor}) - ${observaciones || 'Envío'}`,
-          fecha
+          fecha,
+          tipoTambor
         );
       }
 
@@ -3503,25 +3503,45 @@ function App() {
                               <th>Fecha</th>
                               <th>Operación</th>
                               <th>Cantidad</th>
+                              <th>Producto</th>
+                              <th>Remito</th>
+                              <th>Viaje / Chofer</th>
                               <th>Observaciones</th>
                             </tr>
                           </thead>
                           <tbody>
                             {apicultorSeleccionado.envases.length === 0 ? (
                               <tr>
-                                <td colSpan={4} style={{ textAlign: 'center', padding: '1rem' }}>No hay movimientos de envases.</td>
+                                <td colSpan={7} style={{ textAlign: 'center', padding: '1rem' }}>No hay movimientos de envases.</td>
                               </tr>
                             ) : (
                               apicultorSeleccionado.envases.map((env) => (
                                 <tr key={env.id}>
                                   <td className="font-mono">{new Date(env.fecha).toLocaleDateString()}</td>
                                   <td>
-                                    <span className={`badge ${env.tipo_movimiento === 'PRESTAMO' ? 'badge-danger' : 'badge-success'}`}>
-                                      {env.tipo_movimiento === 'PRESTAMO' ? 'PRESTAMO' : 'DEVOLUCION'}
-                                    </span>
+                                    {env.producto === 'TCM' ? (
+                                      <span className="badge" style={{ backgroundColor: 'var(--amber-light)', color: 'var(--amber)', fontWeight: 700, padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem' }}>
+                                        🍯 TCM (Miel)
+                                      </span>
+                                    ) : (
+                                      <span className={`badge ${env.tipo_movimiento === 'PRESTAMO' ? 'badge-danger' : 'badge-success'}`}>
+                                        {env.tipo_movimiento === 'PRESTAMO' ? '🛢️ PRESTAMO' : '🔄 DEVOLUCION'}
+                                      </span>
+                                    )}
                                   </td>
-                                  <td className="font-mono" style={{ fontWeight: 700 }}>{env.cantidad} tambores</td>
-                                  <td>{env.observaciones || '-'}</td>
+                                  <td className="font-mono" style={{ fontWeight: 700 }}>{env.cantidad} {env.cantidad === 1 ? 'tambor' : 'tambores'}</td>
+                                  <td className="font-mono" style={{ fontWeight: 600 }}>{env.producto || 'TRR'}</td>
+                                  <td className="font-mono">{env.remito || '-'}</td>
+                                  <td style={{ fontSize: '0.85rem' }}>
+                                    {env.nro_viaje || env.chofer ? (
+                                      <span>
+                                        {env.nro_viaje ? `Viaje ${env.nro_viaje}` : ''}
+                                        {env.nro_viaje && env.chofer ? ' / ' : ''}
+                                        {env.chofer ? `${env.chofer}` : ''}
+                                      </span>
+                                    ) : '-'}
+                                  </td>
+                                  <td style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{env.observaciones || '-'}</td>
                                 </tr>
                               ))
                             )}
@@ -4146,32 +4166,57 @@ function App() {
           backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
           zIndex: 999, padding: '1rem'
         }}>
-          <div className="card-premium" style={{ width: '100%', maxWidth: '500px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="card-premium" style={{ width: '100%', maxWidth: '550px', margin: '0 auto', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
               <span className="material-symbols-outlined" style={{ color: 'var(--primary)', fontSize: '24px' }}>download</span>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text-title)' }}>Registrar Recolección Comercial</h3>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text-title)' }}>Registrar Recolección en Campo</h3>
             </div>
             
             <form onSubmit={handleCreateRecoleccion} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Fecha Operación</label>
-                  <input 
-                    type="date" required
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                    value={recoleccionForm.fecha}
-                    onChange={e => setRecoleccionForm({ ...recoleccionForm, fecha: e.target.value })}
-                  />
+              {/* Cabecera del Viaje */}
+              <div style={{ padding: '0.75rem', backgroundColor: '#F8FAFC', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Datos Generales del Viaje</span>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-body)' }}>Fecha</label>
+                    <input 
+                      type="date" required
+                      style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                      value={recoleccionForm.fecha}
+                      onChange={e => setRecoleccionForm({ ...recoleccionForm, fecha: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-body)' }}>Nro. Viaje / Transporte</label>
+                    <input 
+                      type="text" required placeholder="Ej: Viaje 45"
+                      style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                      value={recoleccionForm.nroViaje}
+                      onChange={e => setRecoleccionForm({ ...recoleccionForm, nroViaje: e.target.value })}
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Observaciones</label>
-                  <input 
-                    type="text"
-                    placeholder="Chofer, remito o notas..."
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                    value={recoleccionForm.observaciones}
-                    onChange={e => setRecoleccionForm({ ...recoleccionForm, observaciones: e.target.value })}
-                  />
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-body)' }}>Chofer</label>
+                    <input 
+                      type="text" required placeholder="Ej: Daniel Rossi"
+                      style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                      value={recoleccionForm.chofer}
+                      onChange={e => setRecoleccionForm({ ...recoleccionForm, chofer: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-body)' }}>Observaciones</label>
+                    <input 
+                      type="text" placeholder="Notas adicionales..."
+                      style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                      value={recoleccionForm.observaciones}
+                      onChange={e => setRecoleccionForm({ ...recoleccionForm, observaciones: e.target.value })}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -4187,81 +4232,80 @@ function App() {
                 </label>
                 
                 {recoleccionForm.hasMiel && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Romaneo</label>
-                        <input 
-                          type="text" required placeholder="Ej: 8461"
-                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                          value={recoleccionForm.romaneo}
-                          onChange={e => setRecoleccionForm({ ...recoleccionForm, romaneo: e.target.value })}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Lote</label>
-                        <input 
-                          type="text" placeholder="Ej: 13006"
-                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                          value={recoleccionForm.lote}
-                          onChange={e => setRecoleccionForm({ ...recoleccionForm, lote: e.target.value })}
-                        />
-                      </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cant. Tambores con Miel</label>
+                      <input 
+                        type="number" required min="1"
+                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                        value={recoleccionForm.tamboresQty}
+                        onChange={e => setRecoleccionForm({ ...recoleccionForm, tamboresQty: parseInt(e.target.value) })}
+                      />
                     </div>
-                    
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Remito Miel</label>
+                      <input 
+                        type="text" required placeholder="Ej: REM-00982"
+                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                        value={recoleccionForm.remitoMiel}
+                        onChange={e => setRecoleccionForm({ ...recoleccionForm, remitoMiel: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Checkbox: Devolución de Tambores Vacíos */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: recoleccionForm.hasVaciosDev ? 'rgba(8,32,26,0.02)' : '#FFFFFF' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-title)' }}>
+                  <input 
+                    type="checkbox"
+                    checked={recoleccionForm.hasVaciosDev}
+                    onChange={e => setRecoleccionForm({ ...recoleccionForm, hasVaciosDev: e.target.checked })}
+                  />
+                  🔄 Devolución de Tambores Vacíos (Sin usar)
+                </label>
+                
+                {recoleccionForm.hasVaciosDev && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                       <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cant. Tambores</label>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Tipo de Tambor Vacío</label>
+                        <select 
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF', fontSize: '0.85rem' }}
+                          value={recoleccionForm.tipoTamborDev}
+                          onChange={e => setRecoleccionForm({ ...recoleccionForm, tipoTamborDev: e.target.value })}
+                        >
+                          {productos
+                            .filter(p => p.descripcion.toLowerCase().includes('tambor') && p.producto !== 'TCM')
+                            .map(p => (
+                              <option key={p.producto} value={p.producto}>
+                                {p.producto} - {p.descripcion}
+                              </option>
+                            ))
+                          }
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cantidad</label>
                         <input 
                           type="number" required min="1"
-                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                          value={recoleccionForm.tamboresQty}
-                          onChange={e => setRecoleccionForm({ ...recoleccionForm, tamboresQty: parseInt(e.target.value) })}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Kilos Neto</label>
-                        <input 
-                          type="number" required min="1" step="any"
-                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                          value={recoleccionForm.kilosNeto}
-                          onChange={e => setRecoleccionForm({ ...recoleccionForm, kilosNeto: parseFloat(e.target.value) })}
+                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                          value={recoleccionForm.vaciosDevQty}
+                          onChange={e => setRecoleccionForm({ ...recoleccionForm, vaciosDevQty: parseInt(e.target.value) })}
                         />
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Color (Pfund mm)</label>
-                        <input 
-                          type="number" required min="0" step="any"
-                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                          value={recoleccionForm.colorPfund}
-                          onChange={e => setRecoleccionForm({ ...recoleccionForm, colorPfund: parseFloat(e.target.value) })}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Humedad (%)</label>
-                        <input 
-                          type="number" required min="0" step="any"
-                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                          value={recoleccionForm.humedad}
-                          onChange={e => setRecoleccionForm({ ...recoleccionForm, humedad: parseFloat(e.target.value) })}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>HMF (mg/kg)</label>
-                        <input 
-                          type="number" required min="0" step="any"
-                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                          value={recoleccionForm.hmf}
-                          onChange={e => setRecoleccionForm({ ...recoleccionForm, hmf: parseFloat(e.target.value) })}
-                        />
-                      </div>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Remito Devolución Vacíos</label>
+                      <input 
+                        type="text" required placeholder="Ej: REM-00983"
+                        style={{ width: '100%', maxWidth: '250px', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                        value={recoleccionForm.remitoVaciosDev}
+                        onChange={e => setRecoleccionForm({ ...recoleccionForm, remitoVaciosDev: e.target.value })}
+                      />
                     </div>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block' }}>
-                      💡 Al confirmar, se devolverán automáticamente <strong>{recoleccionForm.tamboresQty} tambores vacíos</strong> del campo del apicultor.
-                    </span>
                   </div>
                 )}
               </div>
@@ -4278,25 +4322,14 @@ function App() {
                 </label>
                 
                 {recoleccionForm.hasOperculo && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
-                    <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Kilos Opérculo</label>
-                      <input 
-                        type="number" required min="1" step="any"
-                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                        value={recoleccionForm.kilosOp}
-                        onChange={e => setRecoleccionForm({ ...recoleccionForm, kilosOp: parseFloat(e.target.value) })}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Rendimiento Cera</label>
-                      <input 
-                        type="number" required min="0" max="1" step="0.01"
-                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                        value={recoleccionForm.rendimientoCera}
-                        onChange={e => setRecoleccionForm({ ...recoleccionForm, rendimientoCera: parseFloat(e.target.value) })}
-                      />
-                    </div>
+                  <div style={{ marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Kilos Opérculo</label>
+                    <input 
+                      type="number" required min="1" step="any"
+                      style={{ width: '100%', maxWidth: '200px', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                      value={recoleccionForm.kilosOp}
+                      onChange={e => setRecoleccionForm({ ...recoleccionForm, kilosOp: parseFloat(e.target.value) })}
+                    />
                   </div>
                 )}
               </div>
@@ -4309,7 +4342,7 @@ function App() {
                     checked={recoleccionForm.hasRecupero}
                     onChange={e => setRecoleccionForm({ ...recoleccionForm, hasRecupero: e.target.checked })}
                   />
-                  🕯️ Cera de Recupero (Cera Pura)
+                  🕯️ Cera de Recupero
                 </label>
                 
                 {recoleccionForm.hasRecupero && (
@@ -4317,7 +4350,7 @@ function App() {
                     <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Kilos Cera Recupero</label>
                     <input 
                       type="number" required min="1" step="any"
-                      style={{ width: '100%', maxWidth: '200px', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                      style={{ width: '100%', maxWidth: '200px', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
                       value={recoleccionForm.kilosRecupero}
                       onChange={e => setRecoleccionForm({ ...recoleccionForm, kilosRecupero: parseFloat(e.target.value) })}
                     />
@@ -4390,12 +4423,18 @@ function App() {
                     <div>
                       <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Tipo Tambor</label>
                       <select 
-                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
+                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF', fontSize: '0.85rem' }}
                         value={distribucionForm.tipoTambor}
                         onChange={e => setDistribucionForm({ ...distribucionForm, tipoTambor: e.target.value })}
                       >
-                        <option value="TRR">TRR (Nuevo Reacondicionado)</option>
-                        <option value="TNA">TNA (Chapa Nueva)</option>
+                        {productos
+                          .filter(p => p.descripcion.toLowerCase().includes('tambor') && p.producto !== 'TCM')
+                          .map(p => (
+                            <option key={p.producto} value={p.producto}>
+                              {p.producto} - {p.descripcion}
+                            </option>
+                          ))
+                        }
                       </select>
                     </div>
                     <div>
