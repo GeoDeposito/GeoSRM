@@ -1,0 +1,41 @@
+# Rules for AI Coding Assistant - APICULTOR SRM / Geo_SRM
+
+All AI assistants working on this codebase MUST follow these instructions strictly:
+
+1. **Mandatory Documentation Reading**:
+   - You MUST read [README.md](file:///c:/Users/Parque-Apicola/Desktop/apicultor_srm/README.md), [ARQUITECTURA_SRM.md](file:///c:/Users/Parque-Apicola/Desktop/apicultor_srm/ARQUITECTURA_SRM.md), [SYS_ARCH.md](file:///c:/Users/Parque-Apicola/Desktop/apicultor_srm/SYS_ARCH.md), and [UI_FLOW.md](file:///c:/Users/Parque-Apicola/Desktop/apicultor_srm/UI_FLOW.md) before making any code modifications.
+   - Failing to do so will result in broken business logic or database constraints.
+
+2. **Project Isolation**:
+   - This project is **APICULTOR SRM** (also known as **Geo_SRM**).
+   - It is 100% independent of **GeoLogística** and **Distribuidora Córdoba** (do NOT reference users like Claudio Oviedo, or their business models).
+   - Maintain all logic, databases, assets, and environments completely isolated.
+
+3. **Technology Stack Rules**:
+   - Frontend: **React + Vite + TypeScript + Vanilla CSS**.
+   - No Tailwind CSS allowed. Use variables and structural CSS defined in `src/styles/variables.css` and `src/styles/index.css`.
+   - Backend: **Supabase** (Project ID: `ajrfkkiuludrdexgprmb`). Use the secret API key (`sb_secret_...`) only in secure database migrations or server scripts, never client-side.
+
+4. **UI/UX Aesthetics (Light Theme)**:
+   - Design must be a clean, modern Light Dashboard.
+   - Background: Slate ultra-light (`#F8FAFC`).
+   - Cards: Pure white with subtle border-radius (`16px`) and soft shadows (`--shadow-card`).
+   - Color accents: Lime green (`#85E344`), Pine green (`#054C34`), and Honey Amber (`#D97706`).
+
+5. **Core Business Logic Rules**:
+   - **Pareto 80/20**: Apicultores are dynamically classified into Clase A (VIP, representing 80% volume) and Clase B.
+   - **Inline Expandable Rows**: Romaneo deliveries in the table expand inline to show drum-by-drum technical details, plus individual romaneo drum count statistics (Clara/Oscura, Altos/Petisos).
+   - **A4 PDF Romaneo Printing**: Individual Romaneo rows feature a print button triggering a clean, printer-friendly A4 PDF layout.
+   - **Unified Operations Modals**:
+     - `+ Registrar Recolección` (Honey/TCM, Opérculo, Cera de Recupero).
+     - `- Registrar Distribución` (Tambores Vacíos, Azúcar, Cera Estampada) - Compacted vertical layout to fit a single screen.
+     - `$ Registrar Transacción` (Financial-only) - Replaces the old CC modal. "Retiro de Insumo" is removed.
+   - **Trazabilidad Service**: Always in ARS. If `Contado`, it creates equal DEBE and HABER entries (net debt 0). If `A Cuenta`, it registers debt in DEBE.
+   - **Dynamic Anticipos**:
+     - `USD` currency asks for monthly interest rate % (`interes_mensual`) and hides price reference.
+     - `ARS` currency asks for reference price (`precio_referencia_miel`/`tcp`) and hides interest rate.
+   - **Ficha Técnica Unification (Option A)**: The bottom `<details>` panel is deleted. Unique columns like `Precio Ref. Miel` and `Miel Equiv.` are merged directly into the main `Financiero` ledger table.
+   - **RENAPA Validation**: CUIT lookup via `public.consultar_renapa(...)` RPC.
+   - **DNI Generation**: Extracted from CUIT central part in real-time.
+   - **SharePoint Integration**: Power Automate calls `public.registrar_tcm_desde_sharepoint(...)` RPC.
+   - **⚠️ PWA Caching**: Vite precaches bundle files through a Service Worker (`dist/sw.js`). A hard refresh (Ctrl+F5) or clearing site data is required to see newly deployed bundles.
