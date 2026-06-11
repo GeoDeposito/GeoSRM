@@ -43,6 +43,10 @@ Plataforma de gestión integral de proveedores apícolas (Supplier Relationship 
 
 *Nota: La aplicación cuenta con un **Mock Mode** integrado. Si no se especifican variables de entorno para Supabase, funcionará y persistirá los datos simulados en `localStorage`.*
 
+### ⚠️ Caché y Service Worker (PWA)
+Esta SPA utiliza un Service Worker (`dist/sw.js`) para almacenar en caché local los recursos estáticos. Si realizas cambios en el código y los compilas/despliegas en producción, es probable que no veas los cambios de inmediato en tu navegador debido a la caché. 
+**Para solucionarlo:** realiza una recarga forzada (**Ctrl + F5** en Windows / **Cmd + Shift + R** en Mac) o borra los datos del sitio desde las Herramientas de Desarrollador (Application -> Storage -> Clear site data).
+
 ---
 
 ## 🔗 Conexión a Supabase (Geo_SRM)

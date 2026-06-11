@@ -77,6 +77,8 @@ La base de datos se aloja en un proyecto de Supabase independiente (Project ID: 
           |                  | precio_ref_miel (num)    |
           |                  | kilos_miel_equiv (num)   |
           |                  | tipo_transaccion (text)  |
+          |                  | tcp (numeric)            |
+          |                  | interes_mensual (numeric)|
           |                  +--------------------------+
           |
           |                  +--------------------------+
@@ -95,7 +97,12 @@ La base de datos se aloja en un proyecto de Supabase independiente (Project ID: 
 ### Reglas de Integridad y Restricciones
 * **Análisis de Miel**: `color_pfund` y `hmf` deben ser valores positivos. `humedad` debe estar comprendida entre `0.00` y `100.00`%.
 * **Control de Envases**: `tipo_movimiento` debe ser `'PRESTAMO'` o `'DEVOLUCION'`.
-* **Cuenta Corriente**: Soporta doble moneda (`'ARS'` y `'USD'`). El `tipo_movimiento` es obligatoriamente `'DEBE'` o `'HABER'`. Permite registrar el `precio_referencia_miel`, `kilos_miel_equiv` (negativo en DEBE), y clasificar la transacción en `tipo_transaccion`.
+* **Cuenta Corriente (Registrar Transacción)**: Solo gestiona movimientos económicos/financieros. El `tipo_movimiento` es `'DEBE'` o `'HABER'`.
+  * **Retiro de Insumo**: Removido del dropdown de transacciones (las entregas de insumos físicos se realizan en el modal de Distribución).
+  * **Servicio de Trazabilidad**: Nuevo tipo (`'SERVICIO_TRAZABILIDAD'`). Siempre es en pesos (ARS). Puede ser `Contado` (genera un DEBE y un HABER del mismo importe para impacto neto de deuda cero) o `A Cuenta` (genera una deuda simple en el DEBE).
+  * **Anticipo de Fondos (Dinámico)**:
+    * Si la moneda es **USD**: Requiere interés mensual en porcentaje (`interes_mensual`). El precio de referencia y equivalencias de miel se ocultan.
+    * Si la moneda es **ARS**: Requiere precio de referencia de miel (`precio_referencia_miel`/`tcp`). El interés mensual se oculta.
 * **Control de Opérculo**: El `tipo_movimiento` debe ser `'ENTREGA_OP'`, `'RETIRO_CERA'`, o `'AJUSTE'`. El rendimiento predeterminado es `0.80`.
 
 ### Funciones SQL Clave
@@ -113,6 +120,10 @@ El frontend está estructurado como una Single Page Application (SPA) modular:
 * **Gestión de Estado**: Lógica reactiva local con mock integrado. Si no se especifican variables en `.env`, la aplicación entra en **Mock Mode**, persistiendo la información de forma coherente en el `localStorage` del cliente.
 * **Firma de Documentos**: Extracción regex de remitos y facturas en la descripción del detalle para mostrarlos en la columna independiente "Documento".
 * **Categorización Pareto 80/20**: Clasificación de apicultores en tiempo real (Clase A y Clase B) basada en su aporte acumulado de kilos netos de miel sobre el total general.
+* **Clasificación de Tambores por Romaneo**: Se eliminó la clasificación global del apicultor y se integró *individualmente dentro del expansor de cada Romaneo* en el historial, detallando tambores altos/petisos y clara/oscura del lote.
+* **Unificación de Ficha Técnica**: Se eliminó el bloque redundante `<details>` (ficha técnica anterior) en la parte inferior de la pantalla. En su lugar, las columnas críticas de equivalencias financieras (`Precio Ref. Miel` y `Miel Equiv.`) se unificaron directamente dentro de la tabla del historial "Financiero".
+* **Impresión de Romaneos**: Cada entrega de Romaneo posee una plantilla de impresión en PDF en formato A4 limpio que detalla la analítica de tambores para entrega física y firmas.
+* **⚠️ Caché de PWA (Service Worker)**: La aplicación genera un service worker (`dist/sw.js`) para precachear el bundle index-*.js. Si se realizan despliegues en producción, el usuario debe refrescar con fuerza (Ctrl+F5 o borrar datos de sitio) para invalidar la caché del Service Worker y ver los cambios.
 
 ---
 

@@ -43,36 +43,41 @@ Al seleccionar un apicultor del directorio o de Pareto, se abre su ficha detalla
    * DNI (icono `fingerprint`).
    * RENAPA (icono `hive`).
 2. **Aporte al Volumen (Pareto 80/20)**: Tarjeta visual que grafica el aporte porcentual del productor y ofrece sugerencias comerciales según su clase (A o B).
-3. **Clasificación de Acopio (Tambores)**: Nueva tarjeta analítica que totaliza las entregas físicas de tambores del apicultor agrupadas por:
-   * *Color*: Miel Clara ($<50\text{ mm Pfund}$) vs. Miel Oscura ($\ge50\text{ mm Pfund}$).
-   * *Tamaño*: Altos ($\ge331\text{ kg}$) vs. Petisos ($\le330\text{ kg}$).
+*(Nota: Se eliminó la antigua tarjeta global de Clasificación de Acopio en esta columna para evitar redundancias globales, moviéndose al detalle individual por Romaneo).*
 
-### Columna Derecha: `📊 Detalle de Operaciones y Ficha Técnica`
-Navegación por pestañas (Tabs), por defecto en `'entregas'`:
+### Columna Derecha: Historial y Movimientos
+Navegación por pestañas (Tabs):
 1. **Historial de Romaneos (Entregas)**:
-   * Muestra la tabla principal con las transacciones comerciales: Fecha, Operación / Detalle, Documento (extrae números de remitos/facturas en badges estilizados), y montos/cantidades.
-   * **Inline Row Expander**: Al hacer clic en una fila del tipo **"Entrega de Miel"**, esta se expande horizontalmente para desplegar una subtabla con el detalle técnico de cada tambor individual:
-     * Columnas: ID GEO (Nro Tambor), SENASA (Barras EAN), Lote, Peso Bruto, Tara, Peso Neto, Humedad, Color (mm), HMF, Antibiótico.
-     * Muestra debajo de la subtabla las estadísticas específicas de ese romaneo (totales Clara/Oscura y Altos/Petisos del lote).
+   * Muestra la tabla principal con las entregas de miel físicas: Fecha, Operación / Detalle (Romaneo), Documento, Físico (kilos y tambores), Analítica Promedio (Color, Humedad, HMF, Antibiótico).
+   * **Inline Row Expander**: Al hacer clic en una fila, se despliega una subtabla con el desglose tambor por tambor (nro tambor, barras EAN, lote, bruto, tara, neto, color, humedad, HMF, antibiótico).
+   * **Estadísticas de Romaneo**: Debajo de la subtabla se visualizan las cantidades analíticas de ese romaneo específico:
+     * *Clara/Oscura* (Color: Pfund < 50mm es Clara).
+     * *Altos/Petisos* (Peso: Bruto >= 331kg es Alto).
+   * **Imprimir Romaneo PDF**: Botón que genera una hoja A4 lista para impresión con el detalle del romaneo de Geomiel.
 2. **Control de Envases**: Detalle cronológico de préstamos y devoluciones de tambores vacíos con el cálculo del Saldo Neto en Campo.
-3. **Cuenta Corriente**: Detalle financiero doble en pesos (ARS) y dólares (USD) con equivalencia en kilos de miel para el balance comercial.
+3. **Cuenta Corriente**: Detalle financiero doble en ARS y USD. Integra de forma unificada (Opción A) el precio de referencia de miel y los kilos equivalentes (anteriormente en el panel inferior eliminado) como columnas directas (`Precio Ref. Miel` y `Miel Equiv.`) en el ledger.
 
 ---
 
 ## 3. Modales Operativos Unificados
 
-Se reemplazó el registro fragmentado por dos formularios emergentes consolidados:
+Se cuenta con tres modales consolidados de alta densidad:
 
 1. **`+ Registrar Recolección`** (Ingresos):
-   * Permite seleccionar el tipo de producto a recolectar:
-     * **Miel (TCM)**: Registra el romaneo, fecha y el listado de tambores individuales (Pesos bruto/tara, color, humedad, HMF, antibiótico). **Aplica un descuento automático** de la cantidad de tambores entregados del saldo neto en campo del apicultor.
-     * **Opérculo**: Registra kilos brutos y rendimiento de cera estimado.
-     * **Cera de Recupero**: Ingreso directo de cera.
+   * Permite seleccionar Miel (TCM), Opérculo, o Cera de Recupero. Para Miel, permite cargar un Romaneo con su listado de tambores y descuenta de forma automática el saldo de envases en campo.
 2. **`- Registrar Distribución`** (Egresos y Préstamos):
-   * Permite seleccionar el tipo de insumo a distribuir/entregar:
-     * **Tambores Vacíos**: Registra préstamo de envases (incrementando el saldo en campo).
-     * **Azúcar**: Registra entrega de bolsas de azúcar como insumo alimenticio (debitando de la cuenta corriente en ARS/USD).
-     * **Cera Estampada**: Registra entrega de cera estampada (debitando de la cuenta corriente).
+   * Permite registrar entregas de Tambores Vacíos, Azúcar, o Cera Estampada.
+   * **Optimización A4**: Márgenes y paddings compactos para que todo el formulario quepa perfectamente en una sola hoja/pantalla vertical sin desborde del botón "Confirmar Distribución".
+3. **`$ Registrar Transacción`** (Operaciones Económicas):
+   * Renombrado de "Cuenta Corriente" para enfatizar que solo procesa transacciones financieras (se removió "Retiro de Insumo").
+   * **Tipo de Operación**:
+     * *Anticipo de Fondos*:
+       * Si es **USD**: Pide tasa de interés mensual (en %) y oculta el precio de referencia.
+       * Si es **ARS**: Pide el precio de referencia de la miel (pesos) y oculta el interés.
+     * *Servicio de Trazabilidad*: Operación exclusiva en ARS. Permite seleccionar:
+       * **Contado**: Genera un DEBE y un HABER por montos idénticos para saldar el movimiento instantáneamente (deuda neta 0).
+       * **A Cuenta**: Registra la deuda en el DEBE.
+     * *Cargo/Venta de Envases vacíos*, *Fijación de Precio / Liquidación*, *Saldo Inicial*, *Ajuste Técnico*.
 
 ---
 

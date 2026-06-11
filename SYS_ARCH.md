@@ -89,7 +89,9 @@ create table if not exists public.ficha_cuenta_corriente (
     detalle text,
     precio_referencia_miel numeric(10, 2), -- Precio de referencia de la miel al registrar
     kilos_miel_equiv numeric(10, 2),       -- Kilos equivalentes de miel (negativo en DEBE)
-    tipo_transaccion text check (tipo_transaccion in ('ANTICIPO_CASH', 'RETIRO_INSUMO', 'CARGO_ENVASE', 'VENTA_LIQUIDACION', 'SALDO_INICIAL', 'AJUSTE')),
+    tipo_transaccion text check (tipo_transaccion in ('ANTICIPO_CASH', 'RETIRO_INSUMO', 'CARGO_ENVASE', 'VENTA_LIQUIDACION', 'SALDO_INICIAL', 'AJUSTE', 'SERVICIO_TRAZABILIDAD')),
+    tcp numeric(12, 2),                    -- Tipo de Cambio Pactado (USD exchange rate if applicable)
+    interes_mensual numeric(6, 2),          -- Interés mensual en % para anticipos en USD
     created_at timestamp with time zone default timezone('utc'::text, now()) not null,
     updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
