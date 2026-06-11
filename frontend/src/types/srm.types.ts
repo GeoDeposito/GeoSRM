@@ -75,6 +75,7 @@ export interface FichaCuentaCorriente {
   precio_referencia_miel?: number;
   kilos_miel_equiv?: number;
   tipo_transaccion?: 'ANTICIPO_CASH' | 'RETIRO_INSUMO' | 'CARGO_ENVASE' | 'VENTA_LIQUIDACION' | 'SALDO_INICIAL' | 'AJUSTE';
+  tcp?: number;
   created_at: string;
   updated_at: string;
 }

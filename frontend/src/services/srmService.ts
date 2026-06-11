@@ -661,7 +661,8 @@ export const srmService = {
     fecha?: string,
     precio_referencia_miel?: number,
     kilos_miel_equiv?: number,
-    tipo_transaccion?: 'ANTICIPO_CASH' | 'RETIRO_INSUMO' | 'CARGO_ENVASE' | 'VENTA_LIQUIDACION' | 'SALDO_INICIAL' | 'AJUSTE'
+    tipo_transaccion?: 'ANTICIPO_CASH' | 'RETIRO_INSUMO' | 'CARGO_ENVASE' | 'VENTA_LIQUIDACION' | 'SALDO_INICIAL' | 'AJUSTE',
+    tcp?: number
   ): Promise<FichaCuentaCorriente> {
     const fechaMov = fecha ? new Date(fecha).toISOString() : new Date().toISOString();
 
@@ -678,6 +679,7 @@ export const srmService = {
         precio_referencia_miel,
         kilos_miel_equiv,
         tipo_transaccion,
+        tcp,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -697,7 +699,8 @@ export const srmService = {
         fecha: fechaMov,
         precio_referencia_miel,
         kilos_miel_equiv,
-        tipo_transaccion
+        tipo_transaccion,
+        tcp
       }])
       .select()
       .single();

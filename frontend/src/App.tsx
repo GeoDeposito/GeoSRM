@@ -15,7 +15,8 @@ import {
   DollarSign,
   ChevronRight,
   Kanban,
-  PieChart
+  PieChart,
+  Printer
 } from 'lucide-react';
 import { srmService } from './services/srmService';
 import { isMockMode } from './services/supabaseClient';
@@ -80,6 +81,46 @@ function App() {
     incidencias: []
   });
   
+  // Estados de cotizaciones y visualizaciones
+  const [globalTcpUsdBlue, setGlobalTcpUsdBlue] = useState<number>(1445.00);
+  const [historyView, setHistoryView] = useState<'consolidado' | 'productos' | 'financiero'>('consolidado');
+  const [renapaVigencia, setRenapaVigencia] = useState<string>('');
+  const [searchTermHistorial, setSearchTermHistorial] = useState<string>('');
+
+  // Efecto para obtener la cotización del dólar blue de Finanzas Argy (vía API pública)
+  useEffect(() => {
+    fetch('https://dolarapi.com/v1/dolares/blue')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.venta) {
+          setGlobalTcpUsdBlue(data.venta);
+        }
+      })
+      .catch(e => {
+        console.error('Error al obtener la cotización del dólar blue:', e);
+      });
+  }, []);
+
+  // Efecto para chequear el RENPA de forma dinámica cuando cambia el apicultor
+  useEffect(() => {
+    if (apicultorSeleccionado && apicultorSeleccionado.cuit) {
+      setRenapaVigencia('Cargando');
+      srmService.consultarRenapa(apicultorSeleccionado.cuit)
+        .then(res => {
+          if (res && res.Result === 'OK' && res.Records && res.Records.length > 0) {
+            setRenapaVigencia(res.Records[0].Estado || 'Vigente');
+          } else {
+            setRenapaVigencia('Desconocido');
+          }
+        })
+        .catch(() => {
+          setRenapaVigencia('Desconocido');
+        });
+    } else {
+      setRenapaVigencia('');
+    }
+  }, [apicultorSeleccionado?.id]);
+
   // Estados de filtros
   const [searchQuery, setSearchQuery] = useState('');
   const [nombreSearchQuery, setNombreSearchQuery] = useState('');
@@ -142,19 +183,17 @@ function App() {
   });
   const [distribucionForm, setDistribucionForm] = useState({
     fecha: new Date().toISOString().substring(0, 10),
+    nroViaje: '',
+    chofer: '',
+    remito: '',
     observaciones: '',
-    hasVacios: false,
-    tipoTambor: 'TRR',
-    vaciosQty: 10,
-    hasAzucar: false,
-    azucarQty: 20,
-    precioAzucar: 45000,
-    monedaAzucar: 'ARS',
-    hasCeraEstampada: false,
-    tipoCeraEstampada: 'CE STD',
-    ceraEstampadaQty: 50,
-    precioCeraEstampada: 4800,
-    monedaCeraEstampada: 'ARS'
+    productoCodigo: '',
+    cantidad: 1,
+    precioArs: 0,
+    precioUsd: 0,
+    tcp: 1445.00,
+    moneda: 'ARS' as 'ARS' | 'USD',
+    condicionPago: 'A_CUENTA' as 'A_CUENTA' | 'PAGADO'
   });
   const [newCCForm, setNewCCForm] = useState({ 
     moneda: 'ARS' as 'ARS' | 'USD', 
@@ -1101,62 +1140,87 @@ function App() {
     if (!apicultorSeleccionado) return;
     try {
       const {
-        fecha, observaciones,
-        hasVacios, tipoTambor, vaciosQty,
-        hasAzucar, azucarQty, precioAzucar, monedaAzucar,
-        hasCeraEstampada, tipoCeraEstampada, ceraEstampadaQty, precioCeraEstampada, monedaCeraEstampada
+        fecha, nroViaje, chofer, remito, observaciones,
+        productoCodigo, cantidad, precioArs, precioUsd, tcp,
+        moneda, condicionPago
       } = distribucionForm;
 
-      if (!hasVacios && !hasAzucar && !hasCeraEstampada) {
-        alert('Debe seleccionar al menos una entrega (Tambores, Azúcar o Cera Estampada).');
+      if (!productoCodigo) {
+        alert('Debe seleccionar un producto.');
+        return;
+      }
+      if (!nroViaje || !chofer || !remito) {
+        alert('Debe completar los campos obligatorios de transporte (Número de Viaje, Chofer y Remito).');
         return;
       }
 
-      // 1. Tambores Vacíos (Préstamo)
-      if (hasVacios) {
+      const prod = productos.find(p => p.producto === productoCodigo || p.codigo.toString() === productoCodigo.toString());
+      const descProducto = prod ? prod.descripcion : productoCodigo;
+      const isTamborVacio = prod && prod.descripcion.toLowerCase().includes('tambor') && prod.producto !== 'TCM';
+      
+      const precioUnitario = moneda === 'ARS' ? precioArs : precioUsd;
+      const montoTotal = cantidad * precioUnitario;
+      const tipoTx = isTamborVacio ? 'CARGO_ENVASE' : 'RETIRO_INSUMO';
+
+      // 1. Registro del movimiento físico de envase (solo para tambores vacíos)
+      if (isTamborVacio) {
         await srmService.createEnvaseMovimiento(
           apicultorSeleccionado.id,
-          'PRESTAMO',
-          vaciosQty,
-          `Préstamo Tambores Vacíos (${tipoTambor}) - ${observaciones || 'Envío'}`,
+          'PRESTAMO', // Entrega en campo
+          cantidad,
+          observaciones || `Distribución: ${descProducto}`,
           fecha,
-          tipoTambor
+          prod.producto,
+          remito,
+          nroViaje,
+          chofer
         );
       }
 
-      // 2. Azúcar
-      if (hasAzucar) {
-        const monto = azucarQty * precioAzucar;
-        const refPrice = monedaAzucar === 'USD' ? 1.0 : 1700;
-        const kilosMielEquiv = - (monto / refPrice);
+      // 2. Registro financiero en Cuenta Corriente
+      const refPriceMiel = moneda === 'USD' ? 1.0 : 1700;
+      
+      if (condicionPago === 'A_CUENTA') {
+        // A Cuenta: Genera deuda (DEBE) y kilos de miel equivalentes negativos
+        const kilosMielEquiv = - (montoTotal / refPriceMiel);
         await srmService.createCuentaCorrienteMovimiento(
           apicultorSeleccionado.id,
-          monedaAzucar as 'ARS' | 'USD',
+          moneda,
           'DEBE',
-          monto,
-          `Distribución Insumo: Azúcar x ${azucarQty} bolsas (Precio: ${precioAzucar} c/u)`,
+          montoTotal,
+          `Distribución A Cuenta: ${descProducto} x ${cantidad} (Remito: ${remito}${nroViaje ? `, Viaje: ${nroViaje}` : ''})`,
           fecha,
-          refPrice,
+          refPriceMiel,
           kilosMielEquiv,
-          'RETIRO_INSUMO'
+          tipoTx,
+          tcp
         );
-      }
-
-      // 3. Cera Estampada
-      if (hasCeraEstampada) {
-        const monto = ceraEstampadaQty * precioCeraEstampada;
-        const refPrice = monedaCeraEstampada === 'USD' ? 1.0 : 1700;
-        const kilosMielEquiv = - (monto / refPrice);
+      } else {
+        // Pagado en el momento: Genera un DEBE (cargo) y un HABER (cobro) simultáneos
         await srmService.createCuentaCorrienteMovimiento(
           apicultorSeleccionado.id,
-          monedaCeraEstampada as 'ARS' | 'USD',
+          moneda,
           'DEBE',
-          monto,
-          `Distribución Insumo: Cera Estampada ${tipoCeraEstampada} x ${ceraEstampadaQty} kg (Precio: ${precioCeraEstampada} c/u)`,
+          montoTotal,
+          `Distribución Contado: ${descProducto} x ${cantidad} (Remito: ${remito}${nroViaje ? `, Viaje: ${nroViaje}` : ''})`,
           fecha,
-          refPrice,
-          kilosMielEquiv,
-          'RETIRO_INSUMO'
+          refPriceMiel,
+          0,
+          tipoTx,
+          tcp
+        );
+
+        await srmService.createCuentaCorrienteMovimiento(
+          apicultorSeleccionado.id,
+          moneda,
+          'HABER',
+          montoTotal,
+          `Cobro Contado: Pago por ${descProducto} x ${cantidad} (Remito: ${remito}${nroViaje ? `, Viaje: ${nroViaje}` : ''})`,
+          fecha,
+          refPriceMiel,
+          0,
+          'ANTICIPO_CASH',
+          tcp
         );
       }
 
@@ -1164,19 +1228,17 @@ function App() {
       // Reset form
       setDistribucionForm({
         fecha: new Date().toISOString().substring(0, 10),
+        nroViaje: '',
+        chofer: '',
+        remito: '',
         observaciones: '',
-        hasVacios: false,
-        tipoTambor: 'TRR',
-        vaciosQty: 10,
-        hasAzucar: false,
-        azucarQty: 20,
-        precioAzucar: 45000,
-        monedaAzucar: 'ARS',
-        hasCeraEstampada: false,
-        tipoCeraEstampada: 'CE STD',
-        ceraEstampadaQty: 50,
-        precioCeraEstampada: 4800,
-        monedaCeraEstampada: 'ARS'
+        productoCodigo: '',
+        cantidad: 1,
+        precioArs: 0,
+        precioUsd: 0,
+        tcp: globalTcpUsdBlue,
+        moneda: 'ARS',
+        condicionPago: 'A_CUENTA'
       });
       // Refetch data
       seleccionarApicultor(apicultorSeleccionado.id);
@@ -1211,7 +1273,8 @@ function App() {
         newCCForm.fecha || undefined,
         newCCForm.precio_referencia_miel || undefined,
         finalKilos || undefined,
-        newCCForm.tipo_transaccion
+        newCCForm.tipo_transaccion,
+        globalTcpUsdBlue
       );
       setShowAddCC(false);
       setNewCCForm({ 
@@ -1275,9 +1338,88 @@ function App() {
   const totalPages = Math.ceil(apicultoresFiltrados.length / itemsPerPage);
   const apicultoresPaginados = apicultoresFiltrados.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
+  const filteredSearch = useMemo(() => {
+    if (!apicultorSeleccionado) return [];
+    
+    // Compile a list of all transactions across categories
+    const list: any[] = [];
+    
+    apicultorSeleccionado.entregas.forEach(e => {
+      list.push({
+        id: e.id,
+        fecha: e.fecha,
+        operacion: `Entrega de Miel (${e.cantidad_tambores} TCM)`,
+        documento: e.romaneo ? `Romaneo #${e.romaneo}` : 'S/N',
+        tambores: e.cantidad_tambores,
+        importe: e.kilos_neto.toLocaleString() + ' kg',
+        est: 'Procesado',
+        tipo: 'delivery',
+        rawEntrega: e
+      });
+    });
+
+    apicultorSeleccionado.envases.forEach(n => {
+      const { cleanedText, document } = extractDocumentAndCleanDetail(n.observaciones || 'Recupero');
+      list.push({
+        fecha: n.fecha,
+        operacion: `${n.tipo_movimiento === 'PRESTAMO' ? 'Préstamo' : 'Devolución'} Envases - ${cleanedText}`,
+        documento: document,
+        tambores: n.tipo_movimiento === 'PRESTAMO' ? n.cantidad : -n.cantidad,
+        importe: '--',
+        est: 'Confirmado',
+        tipo: 'envase'
+      });
+    });
+
+    apicultorSeleccionado.cuenta_corriente.forEach(cc => {
+      const { cleanedText, document } = extractDocumentAndCleanDetail(cc.detalle || '');
+      list.push({
+        fecha: cc.fecha,
+        operacion: `${cc.tipo_transaccion || 'MOVIMIENTO'} - ${cleanedText}`,
+        documento: document,
+        tambores: 0,
+        importe: (cc.tipo_movimiento === 'DEBE' ? '-' : '+') + (cc.moneda === 'USD' ? 'u$s ' : '$') + cc.monto.toLocaleString(),
+        est: 'Liquidado',
+        tipo: 'cc',
+        tipoTransaccion: cc.tipo_transaccion,
+        moneda: cc.moneda,
+        monto: cc.monto,
+        tipoMovimiento: cc.tipo_movimiento,
+        tcp: cc.tcp,
+        kilosMielEquiv: cc.kilos_miel_equiv
+      });
+    });
+
+    // Sort by date descending
+    list.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+
+    // Filter list based on selected view
+    const filteredList = list.filter(item => {
+      if (historyView === 'consolidado') return true;
+      if (historyView === 'productos') {
+        return item.tipo === 'delivery' || item.tipo === 'envase' || (item.tipo === 'cc' && (item.tipoTransaccion === 'RETIRO_INSUMO' || item.tipoTransaccion === 'CARGO_ENVASE'));
+      }
+      if (historyView === 'financiero') {
+        return item.tipo === 'cc';
+      }
+      return true;
+    });
+
+    // Filter based on search term
+    return filteredList.filter(item => {
+      if (!searchTermHistorial) return true;
+      const term = searchTermHistorial.toLowerCase();
+      return (
+        item.operacion.toLowerCase().includes(term) ||
+        (item.documento && item.documento.toLowerCase().includes(term)) ||
+        new Date(item.fecha).toLocaleDateString('es-AR').includes(term)
+      );
+    });
+  }, [apicultorSeleccionado, historyView, searchTermHistorial]);
 
   return (
-    <div className="app-container">
+    <>
+      <div className="app-container no-print">
       {/* Overlay del Sidebar para móviles */}
       <div 
         className={`sidebar-overlay ${mobileMenuOpen ? 'open' : ''}`} 
@@ -1587,7 +1729,28 @@ function App() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+            <a 
+              href="https://www.finanzasargy.com/" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              title="Ver cotización en Finanzas Argy"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                padding: '0.5rem 0.75rem',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(8,32,26,0.03)',
+                border: '1px solid var(--border-color)',
+                color: 'var(--primary)',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                textDecoration: 'none'
+              }}
+            >
+              💵 USD Blue: ${globalTcpUsdBlue.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+            </a>
             {view === 'dashboard' && (
               <>
                 <div style={{
@@ -2900,9 +3063,22 @@ function App() {
                       <span className="label-caps" style={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.125rem' }}>
                         <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>hive</span> RENAPA
                       </span>
-                      <strong className="font-mono" style={{ fontSize: '0.85rem', color: 'var(--text-title)', textTransform: 'uppercase' }}>
-                        {apicultorSeleccionado.renapa || '-'}
-                      </strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <strong className="font-mono" style={{ fontSize: '0.85rem', color: 'var(--text-title)', textTransform: 'uppercase' }}>
+                          {apicultorSeleccionado.renapa || '-'}
+                        </strong>
+                        {apicultorSeleccionado.renapa && (
+                          renapaVigencia === 'Cargando' ? (
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>🔄...</span>
+                          ) : renapaVigencia === 'Vigente' ? (
+                            <span style={{ padding: '0.1rem 0.35rem', borderRadius: '4px', backgroundColor: 'rgba(19,115,51,0.08)', color: '#137333', fontSize: '0.65rem', fontWeight: 800 }}>VIGENTE</span>
+                          ) : renapaVigencia === 'Vencido' ? (
+                            <span style={{ padding: '0.1rem 0.35rem', borderRadius: '4px', backgroundColor: 'rgba(195,7,7,0.08)', color: '#C30707', fontSize: '0.65rem', fontWeight: 800 }}>VENCIDO</span>
+                          ) : (
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>(S/D)</span>
+                          )
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -3017,32 +3193,63 @@ function App() {
               {/* Columna Derecha: KPIs e Historial de Transacciones */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                 
-                {/* Métricas de la Ficha */}
+                {/* Métricas de la Ficha (Grilla de 4 Columnas) */}
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
                   gap: '1.25rem'
                 }}>
+                  {/* Card 1: Envases en Campo */}
                   <div className="card-premium">
-                    <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Saldo Tambores</span>
-                    <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
-                      {apicultorSeleccionado.stats.saldo_envases}
+                    <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Envases en Campo</span>
+                    <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
+                      {apicultorSeleccionado.stats.saldo_envases} uds
                     </h2>
-                    <span style={{ fontSize: '0.75rem', color: '#137333', fontWeight: 700 }}>+12 esta semana</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Tambores vacíos sin entregar</span>
                   </div>
+
+                  {/* Card 2: Balance Cuenta Corriente */}
+                  {(() => {
+                    const saldoConsolidado = apicultorSeleccionado.stats.saldo_financiero_ars + (apicultorSeleccionado.stats.saldo_financiero_usd * globalTcpUsdBlue);
+                    const isDeuda = saldoConsolidado < 0;
+                    return (
+                      <div className="card-premium">
+                        <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>
+                          {isDeuda ? 'Deuda Consolidada' : 'Saldo a Favor'}
+                        </span>
+                        <h2 style={{ 
+                          fontSize: '1.6rem', 
+                          fontWeight: 800, 
+                          color: isDeuda ? 'var(--danger)' : '#137333', 
+                          fontFamily: 'var(--font-title)' 
+                        }}>
+                          ${Math.abs(saldoConsolidado).toLocaleString('es-AR', { maximumFractionDigits: 0 })}.00
+                        </h2>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.1rem' }}>
+                          ARS: ${apicultorSeleccionado.stats.saldo_financiero_ars.toLocaleString('es-AR')} | USD: u$s {apicultorSeleccionado.stats.saldo_financiero_usd.toLocaleString('es-AR')}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Card 3: Acopio Miel (TCM) */}
                   <div className="card-premium">
-                    <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Liquidación Pendiente</span>
-                    <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
-                      ${Math.abs(apicultorSeleccionado.stats.saldo_financiero_ars).toLocaleString('es-AR')}.00
+                    <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Acopio Miel (TCM)</span>
+                    <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
+                      {apicultorSeleccionado.stats.entregas_totales_kilos.toLocaleString('es-AR')} kg
                     </h2>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Siguiente pago: Oct 25</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      {apicultorSeleccionado.stats.entregas_totales_tambores} tambores con miel
+                    </span>
                   </div>
+
+                  {/* Card 4: Acopio Cera y Opérculo */}
                   <div className="card-premium">
-                    <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Entregas Totales</span>
-                    <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
-                      {(apicultorSeleccionado.stats.entregas_totales_kilos / 1000).toFixed(1)}k
+                    <span className="label-caps" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.25rem' }}>Cera y Opérculo</span>
+                    <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-title)', fontFamily: 'var(--font-title)' }}>
+                      {apicultorSeleccionado.stats.saldo_operculo.toLocaleString('es-AR')} kg
                     </h2>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Miel de Pradera: 80%</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Total acumulado entregado</span>
                   </div>
                 </div>
 
@@ -3061,7 +3268,24 @@ function App() {
                       <Plus size={14} style={{ color: '#FFFFFF' }} /> Registrar Recolección
                     </button>
                     <button 
-                      onClick={() => setShowAddDistribucion(true)}
+                      onClick={() => {
+                        const primerProd = productos.length > 0 ? productos[0].producto : '';
+                        setDistribucionForm({
+                          fecha: new Date().toISOString().substring(0, 10),
+                          nroViaje: '',
+                          chofer: '',
+                          remito: '',
+                          observaciones: '',
+                          productoCodigo: primerProd,
+                          cantidad: 1,
+                          precioArs: 0,
+                          precioUsd: 0,
+                          tcp: globalTcpUsdBlue,
+                          moneda: 'ARS',
+                          condicionPago: 'A_CUENTA'
+                        });
+                        setShowAddDistribucion(true);
+                      }}
                       style={{
                         padding: '0.5rem 1rem', borderRadius: '8px', backgroundColor: 'var(--secondary)',
                         color: '#FFFFFF', fontWeight: 700, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
@@ -3097,36 +3321,119 @@ function App() {
                       Historial de Transacciones
                     </h3>
                     
-                    {/* Buscador de transacciones interno */}
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    {/* Buscador de transacciones interno y botón imprimir */}
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                       <input 
                         type="text" 
                         placeholder="Buscar transacción..." 
+                        value={searchTermHistorial}
+                        onChange={e => setSearchTermHistorial(e.target.value)}
                         style={{
                           padding: '0.4rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)',
                           fontSize: '0.8rem', outline: 'none'
                         }} 
                       />
+                      <button 
+                        onClick={() => window.print()}
+                        className="btn-secondary"
+                        style={{
+                          padding: '0.4rem 0.75rem',
+                          fontSize: '0.8rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          borderRadius: '6px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <Printer size={14} /> Imprimir Remito PDF
+                      </button>
                     </div>
+                  </div>
+
+                  {/* Selectores de Pestañas Premium */}
+                  <div style={{
+                    display: 'flex',
+                    borderBottom: '2px solid var(--border-color)',
+                    marginBottom: '1rem',
+                    gap: '1.5rem',
+                    overflowX: 'auto'
+                  }}>
+                    {[
+                      { id: 'consolidado', label: 'Consolidado', desc: 'Todo el historial' },
+                      { id: 'productos', label: 'Productos', desc: 'Físico' },
+                      { id: 'financiero', label: 'Financiero', desc: 'Cta. Corriente' }
+                    ].map(tab => {
+                      const active = historyView === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          onClick={() => setHistoryView(tab.id as any)}
+                          style={{
+                            padding: '0.6rem 0.2rem',
+                            fontWeight: 800,
+                            fontSize: '0.85rem',
+                            color: active ? 'var(--primary)' : 'var(--text-secondary)',
+                            borderBottom: active ? '3px solid var(--primary)' : '3px solid transparent',
+                            background: 'transparent',
+                            borderTop: 0,
+                            borderLeft: 0,
+                            borderRight: 0,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'flex-start',
+                            transition: 'all 0.2s ease',
+                            outline: 'none'
+                          }}
+                        >
+                          <span>{tab.label}</span>
+                          <span style={{ fontSize: '0.65rem', fontWeight: 500, color: 'var(--text-secondary)' }}>
+                            {tab.desc}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
 
                   <div className="table-container">
                     <table className="table-premium">
                       <thead>
-                        <tr>
-                          <th className="font-title">Fecha</th>
-                          <th className="font-title">Operación / Detalle</th>
-                          <th className="font-title text-center">Documento</th>
-                          <th className="font-title text-center">Tambores</th>
-                          <th className="font-title text-right">Importe</th>
-                          <th className="font-title text-right">Estado</th>
-                        </tr>
+                        {historyView === 'consolidado' && (
+                          <tr>
+                            <th className="font-title">Fecha</th>
+                            <th className="font-title">Operación / Detalle</th>
+                            <th className="font-title text-center">Documento</th>
+                            <th className="font-title text-center">Físico (Cant.)</th>
+                            <th className="font-title text-right">Importe</th>
+                            <th className="font-title text-right">Ref. Blue (TCP)</th>
+                            <th className="font-title text-right">Estado</th>
+                          </tr>
+                        )}
+                        {historyView === 'productos' && (
+                          <tr>
+                            <th className="font-title">Fecha</th>
+                            <th className="font-title">Producto / Insumo</th>
+                            <th className="font-title text-center">Documento</th>
+                            <th className="font-title text-center">Cantidad / Unidades</th>
+                            <th className="font-title text-right">Estado</th>
+                          </tr>
+                        )}
+                        {historyView === 'financiero' && (
+                          <tr>
+                            <th className="font-title">Fecha</th>
+                            <th className="font-title">Operación / Detalle</th>
+                            <th className="font-title text-center">Documento</th>
+                            <th className="font-title text-right">Monto Original</th>
+                            <th className="font-title text-right">Referencia TCP</th>
+                            <th className="font-title text-right">Impacto Cuenta</th>
+                            <th className="font-title text-right">Estado</th>
+                          </tr>
+                        )}
                       </thead>
                       <tbody>
                         {(() => {
-                          // Compile a list of all transactions across categories
                           const list: any[] = [];
-                          
                           apicultorSeleccionado.entregas.forEach(e => {
                             list.push({
                               id: e.id,
@@ -3163,165 +3470,288 @@ function App() {
                               tambores: 0,
                               importe: (cc.tipo_movimiento === 'DEBE' ? '-' : '+') + (cc.moneda === 'USD' ? 'u$s ' : '$') + cc.monto.toLocaleString(),
                               est: 'Liquidado',
-                              tipo: 'cc'
+                              tipo: 'cc',
+                              tipoTransaccion: cc.tipo_transaccion,
+                              moneda: cc.moneda,
+                              monto: cc.monto,
+                              tipoMovimiento: cc.tipo_movimiento,
+                              tcp: cc.tcp,
+                              kilosMielEquiv: cc.kilos_miel_equiv
                             });
                           });
 
-                          // Sort by date descending
                           list.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
 
-                          if (list.length === 0) {
+                          const filteredList = list.filter(item => {
+                            if (historyView === 'consolidado') return true;
+                            if (historyView === 'productos') {
+                              return item.tipo === 'delivery' || item.tipo === 'envase' || (item.tipo === 'cc' && (item.tipoTransaccion === 'RETIRO_INSUMO' || item.tipoTransaccion === 'CARGO_ENVASE'));
+                            }
+                            if (historyView === 'financiero') {
+                              return item.tipo === 'cc';
+                            }
+                            return true;
+                          });
+
+                          return filteredList.filter(item => {
+                            if (!searchTermHistorial) return true;
+                            const term = searchTermHistorial.toLowerCase();
                             return (
-                              <tr>
-                                <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
-                                  No hay transacciones registradas.
-                                </td>
-                              </tr>
-                            );
-                          }
-
-                          return list.map((item, idx) => {
-                            const isExpanded = item.tipo === 'delivery' && expandedRomaneos[item.id];
-                            return (
-                              <Fragment key={idx}>
-                                <tr 
-                                  className={`table-row-hover ${item.tipo === 'delivery' ? 'cursor-pointer' : ''}`}
-                                  onClick={() => {
-                                    if (item.tipo === 'delivery' && item.id) {
-                                      setExpandedRomaneos(prev => ({
-                                        ...prev,
-                                        [item.id]: !prev[item.id]
-                                      }));
-                                    }
-                                  }}
-                                >
-                                  <td className="font-mono">{new Date(item.fecha).toLocaleDateString('es-AR')}</td>
-                                  <td>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                                      {item.tipo === 'delivery' && (
-                                        <span className="material-symbols-outlined" style={{ 
-                                          fontSize: '18px', 
-                                          color: 'var(--text-secondary)',
-                                          transform: isExpanded ? 'rotate(90deg)' : 'none',
-                                          transition: 'transform 0.2s'
-                                        }}>
-                                          chevron_right
-                                        </span>
-                                      )}
-                                      <strong style={{ color: 'var(--text-title)' }}>{item.operacion}</strong>
-                                    </div>
-                                  </td>
-                                  <td className="text-center">
-                                    {item.documento !== '--' ? (
-                                      <span className="badge" style={{ backgroundColor: 'rgba(8,32,26,0.06)', color: 'var(--primary)', fontWeight: 700, fontSize: '0.75rem' }}>
-                                        {item.documento}
-                                      </span>
-                                    ) : (
-                                      <span style={{ color: 'var(--text-secondary)' }}>--</span>
-                                    )}
-                                  </td>
-                                  <td className="font-mono text-center" style={{ color: item.tambores !== 0 ? 'var(--text-title)' : 'var(--text-secondary)' }}>
-                                    {item.tambores !== 0 ? (item.tambores > 0 ? `+${item.tambores}` : item.tambores) : '--'}
-                                  </td>
-                                  <td className="font-mono text-right" style={{ 
-                                    fontWeight: 700, 
-                                    color: item.importe.startsWith('-') ? 'var(--danger)' : (item.importe.startsWith('+') ? '#137333' : 'var(--text-title)') 
-                                  }}>
-                                    {item.importe}
-                                  </td>
-                                  <td className="text-right">
-                                    <span className={`badge ${
-                                      item.est === 'Procesado' ? 'badge-success' : item.est === 'Confirmado' ? 'badge-info' : 'badge-amber'
-                                    }`}>
-                                      {item.est}
-                                    </span>
-                                  </td>
-                                </tr>
-
-                                {item.tipo === 'delivery' && isExpanded && (
-                                  <tr>
-                                    <td colSpan={6} style={{ backgroundColor: 'rgba(8,32,26,0.01)', padding: '0.75rem 1rem' }}>
-                                      <div style={{
-                                        borderLeft: '3px solid var(--primary)',
-                                        paddingLeft: '1rem',
-                                        paddingTop: '0.25rem',
-                                        paddingBottom: '0.25rem',
-                                        textAlign: 'left'
-                                      }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                          <h4 className="font-title" style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-title)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.35rem', margin: 0 }}>
-                                            <span className="material-symbols-outlined" style={{ fontSize: '1rem', color: 'var(--primary)' }}>science</span>
-                                            Detalle Técnico de Tambores - {item.documento}
-                                          </h4>
-                                          
-                                          {/* Stats for this Romaneo */}
-                                          {(() => {
-                                            const rStats = computeRomaneoStats(item.rawEntrega.tambores);
-                                            return (
-                                              <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                                                <span>Claras (&lt;50mm): <strong style={{ color: 'var(--primary)' }}>{rStats.clara}</strong></span>
-                                                <span>Oscuras (&ge;50mm): <strong style={{ color: 'var(--secondary)' }}>{rStats.oscura}</strong></span>
-                                                <span>Altos (&ge;331kg): <strong style={{ color: 'var(--text-title)' }}>{rStats.altos}</strong></span>
-                                                <span>Petisos (&le;330kg): <strong style={{ color: 'var(--text-title)' }}>{rStats.petisos}</strong></span>
-                                              </div>
-                                            );
-                                          })()}
-                                        </div>
-
-                                        {(!item.rawEntrega.tambores || item.rawEntrega.tambores.length === 0) ? (
-                                          <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0 }}>No hay tambores individuales registrados para esta entrega.</p>
-                                        ) : (
-                                          <div className="table-container" style={{ margin: '0.5rem 0', boxShadow: 'none', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
-                                            <table className="table-premium" style={{ width: '100%', fontSize: '0.75rem' }}>
-                                              <thead>
-                                                <tr style={{ backgroundColor: '#F9F9F9' }}>
-                                                  <th>ID GEO (Tambor)</th>
-                                                  <th>Cod. SENASA</th>
-                                                  <th>Lote</th>
-                                                  <th style={{ textAlign: 'right' }}>Peso Bruto</th>
-                                                  <th style={{ textAlign: 'right' }}>Tara</th>
-                                                  <th style={{ textAlign: 'right' }}>Peso Neto</th>
-                                                  <th style={{ textAlign: 'center' }}>Humedad</th>
-                                                  <th style={{ textAlign: 'center' }}>Color (mm)</th>
-                                                  <th style={{ textAlign: 'center' }}>HMF</th>
-                                                  <th>Antibiótico</th>
-                                                </tr>
-                                              </thead>
-                                              <tbody>
-                                                {item.rawEntrega.tambores.map((t: any) => (
-                                                  <tr key={t.id} style={{ backgroundColor: '#FFFFFF' }}>
-                                                    <td><strong style={{ color: 'var(--text-title)', fontFamily: 'monospace' }}>{t.nro_tambor}</strong></td>
-                                                    <td className="font-mono" style={{ whiteSpace: 'nowrap' }}>{t.barras_ean || '-'}</td>
-                                                    <td className="font-mono">{t.lote || '-'}</td>
-                                                    <td className="font-mono text-right" style={{ whiteSpace: 'nowrap' }}>{t.kilos_bruto != null ? `${t.kilos_bruto.toFixed(1)} kg` : '-'}</td>
-                                                    <td className="font-mono text-right" style={{ whiteSpace: 'nowrap' }}>{t.tara != null ? `${t.tara.toFixed(1)} kg` : '-'}</td>
-                                                    <td className="font-mono text-right" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{t.kilos_neto != null ? `${t.kilos_neto.toFixed(1)} kg` : '-'}</td>
-                                                    <td className="font-mono text-center" style={{ fontWeight: 700, color: t.humedad && t.humedad > 18 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
-                                                      {t.humedad != null ? `${t.humedad}%` : '-'}
-                                                    </td>
-                                                    <td className="font-mono text-center" style={{ whiteSpace: 'nowrap' }}>{t.color_pfund != null ? `${t.color_pfund} mm` : '-'}</td>
-                                                    <td className="font-mono text-center" style={{ fontWeight: 700, color: t.hmf && t.hmf > 40 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
-                                                      {t.hmf != null ? `${t.hmf} mg/kg` : '-'}
-                                                    </td>
-                                                    <td>
-                                                      <span className={`badge ${t.antibiotico === 'POSITIVO' ? 'badge-danger' : 'badge-success'}`} style={{ fontSize: '0.6rem', padding: '0.15rem 0.35rem' }}>
-                                                        {t.antibiotico || 'NEGATIVO'}
-                                                      </span>
-                                                    </td>
-                                                  </tr>
-                                                ))}
-                                              </tbody>
-                                            </table>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </td>
-                                  </tr>
-                                )}
-                              </Fragment>
+                              item.operacion.toLowerCase().includes(term) ||
+                              (item.documento && item.documento.toLowerCase().includes(term)) ||
+                              new Date(item.fecha).toLocaleDateString('es-AR').includes(term)
                             );
                           });
-                        })()}
+                        })().length === 0 ? (
+                          <tr>
+                            <td colSpan={historyView === 'consolidado' ? 7 : historyView === 'productos' ? 5 : 7} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
+                              No hay transacciones que coincidan con la búsqueda.
+                            </td>
+                          </tr>
+                        ) : (
+                          (() => {
+                            const list: any[] = [];
+                            apicultorSeleccionado.entregas.forEach(e => {
+                              list.push({
+                                id: e.id,
+                                fecha: e.fecha,
+                                operacion: `Entrega de Miel (${e.cantidad_tambores} TCM)`,
+                                documento: e.romaneo ? `Romaneo #${e.romaneo}` : 'S/N',
+                                tambores: e.cantidad_tambores,
+                                importe: e.kilos_neto.toLocaleString() + ' kg',
+                                est: 'Procesado',
+                                tipo: 'delivery',
+                                rawEntrega: e
+                              });
+                            });
+                            apicultorSeleccionado.envases.forEach(n => {
+                              const { cleanedText, document } = extractDocumentAndCleanDetail(n.observaciones || 'Recupero');
+                              list.push({
+                                fecha: n.fecha,
+                                operacion: `${n.tipo_movimiento === 'PRESTAMO' ? 'Préstamo' : 'Devolución'} Envases - ${cleanedText}`,
+                                documento: document,
+                                tambores: n.tipo_movimiento === 'PRESTAMO' ? n.cantidad : -n.cantidad,
+                                importe: '--',
+                                est: 'Confirmado',
+                                tipo: 'envase'
+                              });
+                            });
+                            apicultorSeleccionado.cuenta_corriente.forEach(cc => {
+                              const { cleanedText, document } = extractDocumentAndCleanDetail(cc.detalle || '');
+                              list.push({
+                                fecha: cc.fecha,
+                                operacion: `${cc.tipo_transaccion || 'MOVIMIENTO'} - ${cleanedText}`,
+                                documento: document,
+                                tambores: 0,
+                                importe: (cc.tipo_movimiento === 'DEBE' ? '-' : '+') + (cc.moneda === 'USD' ? 'u$s ' : '$') + cc.monto.toLocaleString(),
+                                est: 'Liquidado',
+                                tipo: 'cc',
+                                tipoTransaccion: cc.tipo_transaccion,
+                                moneda: cc.moneda,
+                                monto: cc.monto,
+                                tipoMovimiento: cc.tipo_movimiento,
+                                tcp: cc.tcp,
+                                kilosMielEquiv: cc.kilos_miel_equiv
+                              });
+                            });
+                            list.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+                            const filteredList = list.filter(item => {
+                              if (historyView === 'consolidado') return true;
+                              if (historyView === 'productos') {
+                                return item.tipo === 'delivery' || item.tipo === 'envase' || (item.tipo === 'cc' && (item.tipoTransaccion === 'RETIRO_INSUMO' || item.tipoTransaccion === 'CARGO_ENVASE'));
+                              }
+                              if (historyView === 'financiero') {
+                                return item.tipo === 'cc';
+                              }
+                              return true;
+                            });
+                            return filteredList.filter(item => {
+                              if (!searchTermHistorial) return true;
+                              const term = searchTermHistorial.toLowerCase();
+                              return (
+                                item.operacion.toLowerCase().includes(term) ||
+                                (item.documento && item.documento.toLowerCase().includes(term)) ||
+                                new Date(item.fecha).toLocaleDateString('es-AR').includes(term)
+                              );
+                            }).map((item, idx) => {
+                              const isExpanded = item.tipo === 'delivery' && expandedRomaneos[item.id];
+                              const match = item.tipo === 'cc' && item.operacion.match(/x\s*(\d+)/i);
+                              const ccQty = match ? `${match[1]} u` : '--';
+                              const activeCols = historyView === 'consolidado' ? 7 : historyView === 'productos' ? 5 : 7;
+                              
+                              return (
+                                <Fragment key={idx}>
+                                  <tr 
+                                    className={`table-row-hover ${item.tipo === 'delivery' ? 'cursor-pointer' : ''}`}
+                                    onClick={() => {
+                                      if (item.tipo === 'delivery' && item.id) {
+                                        setExpandedRomaneos(prev => ({
+                                          ...prev,
+                                          [item.id]: !prev[item.id]
+                                        }));
+                                      }
+                                    }}
+                                  >
+                                    <td className="font-mono">{new Date(item.fecha).toLocaleDateString('es-AR')}</td>
+                                    <td>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                        {item.tipo === 'delivery' && (
+                                          <span className="material-symbols-outlined" style={{ 
+                                            fontSize: '18px', 
+                                            color: 'var(--text-secondary)',
+                                            transform: isExpanded ? 'rotate(90deg)' : 'none',
+                                            transition: 'transform 0.2s'
+                                          }}>
+                                            chevron_right
+                                          </span>
+                                        )}
+                                        <strong style={{ color: 'var(--text-title)' }}>{item.operacion}</strong>
+                                      </div>
+                                    </td>
+                                    <td className="text-center">
+                                      {item.documento !== '--' ? (
+                                        <span className="badge" style={{ backgroundColor: 'rgba(8,32,26,0.06)', color: 'var(--primary)', fontWeight: 700, fontSize: '0.75rem' }}>
+                                          {item.documento}
+                                        </span>
+                                      ) : (
+                                        <span style={{ color: 'var(--text-secondary)' }}>--</span>
+                                      )}
+                                    </td>
+                                    
+                                    {historyView === 'consolidado' && (
+                                      <>
+                                        <td className="font-mono text-center" style={{ color: item.tambores !== 0 ? 'var(--text-title)' : 'var(--text-secondary)' }}>
+                                          {item.tipo === 'delivery' ? `${item.tambores} TCM` : item.tipo === 'envase' ? (item.tambores > 0 ? `+${item.tambores} u` : `${item.tambores} u`) : '--'}
+                                        </td>
+                                        <td className="font-mono text-right" style={{ 
+                                          fontWeight: 700, 
+                                          color: item.tipo === 'cc' && item.importe.startsWith('-') ? 'var(--danger)' : (item.tipo === 'cc' && item.importe.startsWith('+') ? '#137333' : 'var(--text-title)') 
+                                        }}>
+                                          {item.tipo === 'cc' ? item.importe : '--'}
+                                        </td>
+                                        <td className="font-mono text-right" style={{ color: 'var(--text-title)' }}>
+                                          {item.tipo === 'cc' && item.tcp ? `$ ${item.tcp.toLocaleString('es-AR', { minimumFractionDigits: 2 })}` : '--'}
+                                        </td>
+                                      </>
+                                    )}
+
+                                    {historyView === 'productos' && (
+                                      <td className="font-mono text-center" style={{ fontWeight: 700, color: 'var(--text-title)' }}>
+                                        {item.tipo === 'delivery' ? `${item.tambores} TCM (${item.importe})` : item.tipo === 'envase' ? (item.tambores > 0 ? `+${item.tambores} u` : `${item.tambores} u`) : ccQty}
+                                      </td>
+                                    )}
+
+                                    {historyView === 'financiero' && (
+                                      <>
+                                        <td className="font-mono text-right" style={{ color: 'var(--text-title)' }}>
+                                          {item.moneda === 'USD' ? `u$s ${item.monto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}` : `$ ${item.monto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`}
+                                        </td>
+                                        <td className="font-mono text-right" style={{ color: 'var(--text-title)' }}>
+                                          {item.tcp ? `$ ${item.tcp.toLocaleString('es-AR', { minimumFractionDigits: 2 })}` : '--'}
+                                        </td>
+                                        <td className="font-mono text-right" style={{ 
+                                          fontWeight: 700, 
+                                          color: item.tipoMovimiento === 'DEBE' ? 'var(--danger)' : '#137333' 
+                                        }}>
+                                          {item.tipoMovimiento === 'DEBE' ? '-' : '+'}{item.moneda === 'USD' ? 'u$s' : '$'} {item.monto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                        </td>
+                                      </>
+                                    )}
+
+                                    <td className="text-right">
+                                      <span className={`badge ${
+                                        item.est === 'Procesado' ? 'badge-success' : item.est === 'Confirmado' ? 'badge-info' : 'badge-amber'
+                                      }`}>
+                                        {item.est}
+                                      </span>
+                                    </td>
+                                  </tr>
+
+                                  {item.tipo === 'delivery' && isExpanded && (
+                                    <tr>
+                                      <td colSpan={activeCols} style={{ backgroundColor: 'rgba(8,32,26,0.01)', padding: '0.75rem 1rem' }}>
+                                        <div style={{
+                                          borderLeft: '3px solid var(--primary)',
+                                          paddingLeft: '1rem',
+                                          paddingTop: '0.25rem',
+                                          paddingBottom: '0.25rem',
+                                          textAlign: 'left'
+                                        }}>
+                                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                            <h4 className="font-title" style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-title)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.35rem', margin: 0 }}>
+                                              <span className="material-symbols-outlined" style={{ fontSize: '1rem', color: 'var(--primary)' }}>science</span>
+                                              Detalle Técnico de Tambores - {item.documento}
+                                            </h4>
+                                            
+                                            {/* Stats for this Romaneo */}
+                                            {(() => {
+                                              const rStats = computeRomaneoStats(item.rawEntrega.tambores);
+                                              return (
+                                                <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                                                  <span>Claras (&lt;50mm): <strong style={{ color: 'var(--primary)' }}>{rStats.clara}</strong></span>
+                                                  <span>Oscuras (&ge;50mm): <strong style={{ color: 'var(--secondary)' }}>{rStats.oscura}</strong></span>
+                                                  <span>Altos (&ge;331kg): <strong style={{ color: 'var(--text-title)' }}>{rStats.altos}</strong></span>
+                                                  <span>Petisos (&le;330kg): <strong style={{ color: 'var(--text-title)' }}>{rStats.petisos}</strong></span>
+                                                </div>
+                                              );
+                                            })()}
+                                          </div>
+
+                                          {(!item.rawEntrega.tambores || item.rawEntrega.tambores.length === 0) ? (
+                                            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0 }}>No hay tambores individuales registrados para esta entrega.</p>
+                                          ) : (
+                                            <div className="table-container" style={{ margin: '0.5rem 0', boxShadow: 'none', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                                              <table className="table-premium" style={{ width: '100%', fontSize: '0.75rem' }}>
+                                                <thead>
+                                                  <tr style={{ backgroundColor: '#F9F9F9' }}>
+                                                    <th>ID GEO (Tambor)</th>
+                                                    <th>Cod. SENASA</th>
+                                                    <th>Lote</th>
+                                                    <th style={{ textAlign: 'right' }}>Peso Bruto</th>
+                                                    <th style={{ textAlign: 'right' }}>Tara</th>
+                                                    <th style={{ textAlign: 'right' }}>Peso Neto</th>
+                                                    <th style={{ textAlign: 'center' }}>Humedad</th>
+                                                    <th style={{ textAlign: 'center' }}>Color (mm)</th>
+                                                    <th style={{ textAlign: 'center' }}>HMF</th>
+                                                    <th>Antibiótico</th>
+                                                  </tr>
+                                                </thead>
+                                                <tbody>
+                                                  {item.rawEntrega.tambores.map((t: any) => (
+                                                    <tr key={t.id} style={{ backgroundColor: '#FFFFFF' }}>
+                                                      <td><strong style={{ color: 'var(--text-title)', fontFamily: 'monospace' }}>{t.nro_tambor}</strong></td>
+                                                      <td className="font-mono" style={{ whiteSpace: 'nowrap' }}>{t.barras_ean || '-'}</td>
+                                                      <td className="font-mono">{t.lote || '-'}</td>
+                                                      <td className="font-mono text-right" style={{ whiteSpace: 'nowrap' }}>{t.kilos_bruto != null ? `${t.kilos_bruto.toFixed(1)} kg` : '-'}</td>
+                                                      <td className="font-mono text-right" style={{ whiteSpace: 'nowrap' }}>{t.tara != null ? `${t.tara.toFixed(1)} kg` : '-'}</td>
+                                                      <td className="font-mono text-right" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{t.kilos_neto != null ? `${t.kilos_neto.toFixed(1)} kg` : '-'}</td>
+                                                      <td className="font-mono text-center" style={{ fontWeight: 700, color: t.humedad && t.humedad > 18 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
+                                                        {t.humedad != null ? `${t.humedad}%` : '-'}
+                                                      </td>
+                                                      <td className="font-mono text-center" style={{ whiteSpace: 'nowrap' }}>{t.color_pfund != null ? `${t.color_pfund} mm` : '-'}</td>
+                                                      <td className="font-mono text-center" style={{ fontWeight: 700, color: t.hmf && t.hmf > 40 ? 'var(--danger)' : 'var(--text-title)', whiteSpace: 'nowrap' }}>
+                                                        {t.hmf != null ? `${t.hmf} mg/kg` : '-'}
+                                                      </td>
+                                                      <td>
+                                                        <span className={`badge ${t.antibiotico === 'POSITIVO' ? 'badge-danger' : 'badge-success'}`} style={{ fontSize: '0.6rem', padding: '0.15rem 0.35rem' }}>
+                                                          {t.antibiotico || 'NEGATIVO'}
+                                                        </span>
+                                                      </td>
+                                                    </tr>
+                                                  ))}
+                                                </tbody>
+                                              </table>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </Fragment>
+                              );
+                            });
+                          })()
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -4396,173 +4826,226 @@ function App() {
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Observaciones</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Número de Viaje *</label>
                   <input 
-                    type="text"
-                    placeholder="Notas o remito..."
+                    type="text" required placeholder="Ej. V0025"
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                    value={distribucionForm.observaciones}
-                    onChange={e => setDistribucionForm({ ...distribucionForm, observaciones: e.target.value })}
+                    value={distribucionForm.nroViaje}
+                    onChange={e => setDistribucionForm({ ...distribucionForm, nroViaje: e.target.value })}
                   />
                 </div>
               </div>
 
-              {/* Checkbox: Tambores Vacíos */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: distribucionForm.hasVacios ? 'rgba(8,32,26,0.02)' : '#FFFFFF' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-title)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Chofer *</label>
                   <input 
-                    type="checkbox"
-                    checked={distribucionForm.hasVacios}
-                    onChange={e => setDistribucionForm({ ...distribucionForm, hasVacios: e.target.checked })}
+                    type="text" required placeholder="Nombre del chofer..."
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    value={distribucionForm.chofer}
+                    onChange={e => setDistribucionForm({ ...distribucionForm, chofer: e.target.value })}
                   />
-                  🛢️ Tambores Vacíos (Préstamo)
-                </label>
-                
-                {distribucionForm.hasVacios && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
-                    <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Tipo Tambor</label>
-                      <select 
-                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF', fontSize: '0.85rem' }}
-                        value={distribucionForm.tipoTambor}
-                        onChange={e => setDistribucionForm({ ...distribucionForm, tipoTambor: e.target.value })}
-                      >
-                        {productos
-                          .filter(p => p.descripcion.toLowerCase().includes('tambor') && p.producto !== 'TCM')
-                          .map(p => (
-                            <option key={p.producto} value={p.producto}>
-                              {p.producto} - {p.descripcion}
-                            </option>
-                          ))
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Remito de Distribución *</label>
+                  <input 
+                    type="text" required placeholder="Ej. R-0004-1234"
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                    value={distribucionForm.remito}
+                    onChange={e => setDistribucionForm({ ...distribucionForm, remito: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Observaciones / Notas</label>
+                <input 
+                  type="text" placeholder="Ej. Entrega en galpón del apicultor..."
+                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
+                  value={distribucionForm.observaciones}
+                  onChange={e => setDistribucionForm({ ...distribucionForm, observaciones: e.target.value })}
+                />
+              </div>
+
+              {/* Selector de Producto */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: '#FFFFFF' }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)', display: 'block', marginBottom: '0.5rem' }}>📦 Producto a Distribuir</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.75rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Seleccionar Producto</label>
+                    <select 
+                      style={{ width: '100%', padding: '0.45rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF', fontSize: '0.85rem' }}
+                      value={distribucionForm.productoCodigo}
+                      onChange={e => {
+                        const code = e.target.value;
+                        // Pre-cargar precios sugeridos para agilizar
+                        let sugUsd = 0;
+                        let sugArs = 0;
+                        const selectedProd = productos.find(p => p.producto === code);
+                        if (selectedProd) {
+                          const desc = selectedProd.descripcion.toLowerCase();
+                          if (desc.includes('tambor') && !desc.includes('miel')) {
+                            sugUsd = 35.00; // precio sugerido tambores vacios
+                          } else if (desc.includes('azucar') || desc.includes('azúcar')) {
+                            sugUsd = 40.00; // precio sugerido azucar
+                          } else if (desc.includes('cera') || desc.includes('estampada')) {
+                            sugUsd = 4.00; // precio sugerido cera por kg
+                          }
+                          sugArs = sugUsd * (distribucionForm.tcp || 1445.00);
                         }
-                      </select>
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cantidad</label>
-                      <input 
-                        type="number" required min="1"
-                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                        value={distribucionForm.vaciosQty}
-                        onChange={e => setDistribucionForm({ ...distribucionForm, vaciosQty: parseInt(e.target.value) })}
-                      />
-                    </div>
+                        setDistribucionForm({ 
+                          ...distribucionForm, 
+                          productoCodigo: code,
+                          precioUsd: sugUsd,
+                          precioArs: sugArs
+                        });
+                      }}
+                    >
+                      <option value="">-- Seleccionar --</option>
+                      {productos.map(p => (
+                        <option key={p.codigo} value={p.producto}>
+                          {p.producto} - {p.descripcion}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                )}
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Cantidad</label>
+                    <input 
+                      type="number" required min="1" step="any"
+                      style={{ width: '100%', padding: '0.45rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                      value={distribucionForm.cantidad}
+                      onChange={e => setDistribucionForm({ ...distribucionForm, cantidad: parseFloat(e.target.value) || 1 })}
+                    />
+                  </div>
+                </div>
               </div>
 
-              {/* Checkbox: Azúcar */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: distribucionForm.hasAzucar ? 'rgba(8,32,26,0.02)' : '#FFFFFF' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-title)' }}>
-                  <input 
-                    type="checkbox"
-                    checked={distribucionForm.hasAzucar}
-                    onChange={e => setDistribucionForm({ ...distribucionForm, hasAzucar: e.target.checked })}
-                  />
-                  🍬 Insumo: Azúcar (Alimentación)
-                </label>
+              {/* Precios y Tipo de Cambio */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: 'rgba(8,32,26,0.01)' }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)', display: 'block', marginBottom: '0.5rem' }}>💰 Valuación Comercial</label>
                 
-                {distribucionForm.hasAzucar && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cant. Bolsas</label>
-                        <input 
-                          type="number" required min="1"
-                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                          value={distribucionForm.azucarQty}
-                          onChange={e => setDistribucionForm({ ...distribucionForm, azucarQty: parseInt(e.target.value) })}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Moneda</label>
-                        <select 
-                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
-                          value={distribucionForm.monedaAzucar}
-                          onChange={e => setDistribucionForm({ ...distribucionForm, monedaAzucar: e.target.value as any })}
-                        >
-                          <option value="ARS">Pesos (ARS)</option>
-                          <option value="USD">Dólares (USD)</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Precio Unitario Bolsa</label>
-                      <input 
-                        type="number" required min="0" step="any"
-                        style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                        value={distribucionForm.precioAzucar}
-                        onChange={e => setDistribucionForm({ ...distribucionForm, precioAzucar: parseFloat(e.target.value) })}
-                      />
-                    </div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--danger)', fontWeight: 600 }}>
-                      ⚠️ Importe total a debitar de la CC: {(distribucionForm.azucarQty * distribucionForm.precioAzucar).toLocaleString()} {distribucionForm.monedaAzucar}
-                    </span>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Precio Unit. (USD)</label>
+                    <input 
+                      type="number" required min="0" step="any"
+                      style={{ width: '100%', padding: '0.45rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                      value={distribucionForm.precioUsd}
+                      onChange={e => {
+                        const usd = parseFloat(e.target.value) || 0;
+                        setDistribucionForm({
+                          ...distribucionForm,
+                          precioUsd: usd,
+                          precioArs: usd * distribucionForm.tcp
+                        });
+                      }}
+                    />
                   </div>
-                )}
+                  <div>
+                    <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Precio Unit. (ARS)</label>
+                    <input 
+                      type="number" required min="0" step="any"
+                      style={{ width: '100%', padding: '0.45rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                      value={distribucionForm.precioArs}
+                      onChange={e => {
+                        const ars = parseFloat(e.target.value) || 0;
+                        setDistribucionForm({
+                          ...distribucionForm,
+                          precioArs: ars,
+                          precioUsd: distribucionForm.tcp > 0 ? (ars / distribucionForm.tcp) : 0
+                        });
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)' }}>TCP (USD Blue)</label>
+                    <input 
+                      type="number" required min="1" step="any"
+                      style={{ width: '100%', padding: '0.45rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                      value={distribucionForm.tcp}
+                      onChange={e => {
+                        const newTcp = parseFloat(e.target.value) || 1;
+                        setDistribucionForm({
+                          ...distribucionForm,
+                          tcp: newTcp,
+                          precioArs: distribucionForm.precioUsd * newTcp
+                        });
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
+                  <a 
+                    href="https://www.finanzasargy.com/" 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    style={{ fontSize: '0.72rem', color: 'var(--primary)', fontWeight: 600, textDecoration: 'underline' }}
+                  >
+                    🔗 Ver cotización en Finanzas Argy
+                  </a>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginRight: '0.35rem' }}>Moneda Facturada:</label>
+                    <select 
+                      style={{ padding: '0.2rem 0.4rem', borderRadius: '4px', border: '1px solid var(--border-color)', backgroundColor: '#FFFFFF', fontSize: '0.75rem', fontWeight: 700 }}
+                      value={distribucionForm.moneda}
+                      onChange={e => setDistribucionForm({ ...distribucionForm, moneda: e.target.value as any })}
+                    >
+                      <option value="ARS">Pesos (ARS)</option>
+                      <option value="USD">Dólares (USD)</option>
+                    </select>
+                  </div>
+                </div>
               </div>
 
-              {/* Checkbox: Cera Estampada */}
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: distribucionForm.hasCeraEstampada ? 'rgba(8,32,26,0.02)' : '#FFFFFF' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-title)' }}>
-                  <input 
-                    type="checkbox"
-                    checked={distribucionForm.hasCeraEstampada}
-                    onChange={e => setDistribucionForm({ ...distribucionForm, hasCeraEstampada: e.target.checked })}
-                  />
-                  🕯️ Insumo: Cera Estampada
-                </label>
-                
-                {distribucionForm.hasCeraEstampada && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.75rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.75rem' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Tipo Cera</label>
-                        <select 
-                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
-                          value={distribucionForm.tipoCeraEstampada}
-                          onChange={e => setDistribucionForm({ ...distribucionForm, tipoCeraEstampada: e.target.value })}
-                        >
-                          <option value="CE STD">CE STD (Cera Estampada Estándar)</option>
-                          <option value="CE PREM">CE PREM (Cera Estampada Premium)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cantidad (kg)</label>
-                        <input 
-                          type="number" required min="1" step="any"
-                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                          value={distribucionForm.ceraEstampadaQty}
-                          onChange={e => setDistribucionForm({ ...distribucionForm, ceraEstampadaQty: parseFloat(e.target.value) })}
-                        />
-                      </div>
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Moneda</label>
-                        <select 
-                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem', backgroundColor: '#FFFFFF' }}
-                          value={distribucionForm.monedaCeraEstampada}
-                          onChange={e => setDistribucionForm({ ...distribucionForm, monedaCeraEstampada: e.target.value as any })}
-                        >
-                          <option value="ARS">Pesos (ARS)</option>
-                          <option value="USD">Dólares (USD)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Precio por kg</label>
-                        <input 
-                          type="number" required min="0" step="any"
-                          style={{ width: '100%', padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', marginTop: '0.25rem' }}
-                          value={distribucionForm.precioCeraEstampada}
-                          onChange={e => setDistribucionForm({ ...distribucionForm, precioCeraEstampada: parseFloat(e.target.value) })}
-                        />
-                      </div>
-                    </div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--danger)', fontWeight: 600 }}>
-                      ⚠️ Importe total a debitar de la CC: {(distribucionForm.ceraEstampadaQty * distribucionForm.precioCeraEstampada).toLocaleString()} {distribucionForm.monedaCeraEstampada}
-                    </span>
-                  </div>
-                )}
+              {/* Condición de Pago */}
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', backgroundColor: '#FFFFFF' }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)', display: 'block', marginBottom: '0.5rem' }}>💳 Condición de Pago</label>
+                <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.25rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>
+                    <input 
+                      type="radio" 
+                      name="condicionPago" 
+                      value="A_CUENTA"
+                      checked={distribucionForm.condicionPago === 'A_CUENTA'}
+                      onChange={() => setDistribucionForm({ ...distribucionForm, condicionPago: 'A_CUENTA' })}
+                    />
+                    A Cuenta (Aumenta Deuda)
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>
+                    <input 
+                      type="radio" 
+                      name="condicionPago" 
+                      value="PAGADO"
+                      checked={distribucionForm.condicionPago === 'PAGADO'}
+                      onChange={() => setDistribucionForm({ ...distribucionForm, condicionPago: 'PAGADO' })}
+                    />
+                    Pagado en el Momento (Contado)
+                  </label>
+                </div>
+
+                <div style={{ marginTop: '0.75rem', padding: '0.6rem', borderRadius: '6px', backgroundColor: 'rgba(8,32,26,0.02)', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  {(() => {
+                    const precioUnit = distribucionForm.moneda === 'ARS' ? distribucionForm.precioArs : distribucionForm.precioUsd;
+                    const tot = distribucionForm.cantidad * precioUnit;
+                    const monText = distribucionForm.moneda === 'ARS' ? '$' : 'u$s';
+                    
+                    if (distribucionForm.condicionPago === 'A_CUENTA') {
+                      return (
+                        <span>
+                          ⚠️ <strong>Impacto Financiero:</strong> Se debitará un total de <strong>{monText} {tot.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</strong> de la cuenta corriente, incrementando la devaluación y la deuda del apicultor.
+                        </span>
+                      );
+                    } else {
+                      return (
+                        <span>
+                          ✅ <strong>Impacto Financiero:</strong> Se registrará una distribución de contado por <strong>{monText} {tot.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</strong> y su pago inmediato. El impacto neto en su deuda será <strong>cero</strong>.
+                        </span>
+                      );
+                    }
+                  })()}
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
@@ -5490,7 +5973,307 @@ function App() {
         </div>
       )}
     </div>
-  );
+
+    {/* Container de Impresión (Remito PDF) */}
+    {apicultorSeleccionado && (
+      <div className="print-only print-remito-container">
+        <div className="print-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <img 
+              src="/logo-geomiel.png?v=4" 
+              alt="GeoMiel Logo" 
+              style={{ height: '50px', width: 'auto', objectFit: 'contain' }} 
+            />
+            <div style={{ textAlign: 'left' }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 900, color: '#08201a', margin: 0, letterSpacing: '0.05em' }}>
+                GEOMIEL S.A.
+              </h2>
+              <p style={{ fontSize: '0.75rem', color: '#555', margin: '0.1rem 0 0 0', lineHeight: 1.3 }}>
+                Dirección: J. Sampayo 180, General Pico, La Pampa<br />
+                Teléfono: 2302 520218 | Email: contacto@geomiel.com.ar
+              </p>
+            </div>
+          </div>
+          <div className="print-title-block">
+            <h1 className="print-title">Remito de Cuenta</h1>
+            <p className="print-subtitle">
+              Fecha: {new Date().toLocaleDateString('es-AR')} | Vista: {historyView.toUpperCase()}
+            </p>
+          </div>
+        </div>
+
+        <div className="print-details-grid">
+          <div className="print-details-box" style={{ textAlign: 'left' }}>
+            <h4>Datos del Apicultor</h4>
+            <p><strong>Nombre / Razón Social:</strong> {apicultorSeleccionado.nombre}</p>
+            <p><strong>CUIT:</strong> {apicultorSeleccionado.cuit}</p>
+            <p>
+              <strong>RENPA:</strong> {apicultorSeleccionado.renapa}{' '}
+              {renapaVigencia && (
+                <span style={{ 
+                  fontWeight: 700, 
+                  color: renapaVigencia === 'Vigente' ? '#137333' : renapaVigencia === 'Vencido' ? '#c5221f' : '#555' 
+                }}>
+                  ({renapaVigencia.toUpperCase()})
+                </span>
+              )}
+            </p>
+            <p><strong>Localidad:</strong> {apicultorSeleccionado.localidad || '--'} ({apicultorSeleccionado.provincia || '--'})</p>
+            <p><strong>Teléfono:</strong> {apicultorSeleccionado.telefono || '--'}</p>
+          </div>
+          <div className="print-details-box" style={{ textAlign: 'left' }}>
+            <h4>Estado de Cuenta (Consolidado)</h4>
+            <p>
+              <strong>Saldo de Envases:</strong> {apicultorSeleccionado.stats.saldo_envases} tambores en campo
+            </p>
+            <p>
+              <strong>Saldo ARS:</strong> ${apicultorSeleccionado.stats.saldo_financiero_ars.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+            </p>
+            <p>
+              <strong>Saldo USD:</strong> u$s {apicultorSeleccionado.stats.saldo_financiero_usd.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+            </p>
+            <p>
+              <strong>TCP de Referencia (Dólar Blue):</strong> ${globalTcpUsdBlue.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+            </p>
+            <p style={{ fontSize: '0.9rem', marginTop: '0.5rem', borderTop: '1px dashed #ccc', paddingTop: '0.5rem' }}>
+              <strong>Saldo Consolidado Valuado:</strong>{' '}
+              <span style={{ 
+                fontWeight: 800, 
+                color: (apicultorSeleccionado.stats.saldo_financiero_ars + (apicultorSeleccionado.stats.saldo_financiero_usd * globalTcpUsdBlue)) >= 0 ? '#137333' : '#c5221f'
+              }}>
+                ${(apicultorSeleccionado.stats.saldo_financiero_ars + (apicultorSeleccionado.stats.saldo_financiero_usd * globalTcpUsdBlue)).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+              </span>
+            </p>
+          </div>
+        </div>
+
+        <h3 style={{ fontSize: '1.1rem', borderBottom: '1px solid #333', paddingBottom: '0.25rem', marginBottom: '1rem', color: '#08201a', textAlign: 'left' }}>
+          Detalle de Movimientos ({historyView.charAt(0).toUpperCase() + historyView.slice(1)})
+        </h3>
+
+        <table className="print-table">
+          <thead>
+            {historyView === 'consolidado' && (
+              <tr>
+                <th style={{ width: '12%' }}>Fecha</th>
+                <th>Detalle / Operación</th>
+                <th style={{ width: '15%' }}>Documento</th>
+                <th style={{ width: '15%', textAlign: 'center' }}>Físico (Cant.)</th>
+                <th style={{ width: '18%', textAlign: 'right' }}>Importe / Saldo</th>
+                <th style={{ width: '15%', textAlign: 'right' }}>TCP Ref.</th>
+              </tr>
+            )}
+            {historyView === 'productos' && (
+              <tr>
+                <th style={{ width: '12%' }}>Fecha</th>
+                <th>Producto / Insumo</th>
+                <th style={{ width: '18%' }}>Documento</th>
+                <th style={{ width: '25%', textAlign: 'center' }}>Cantidad / Unidades</th>
+              </tr>
+            )}
+            {historyView === 'financiero' && (
+              <tr>
+                <th style={{ width: '12%' }}>Fecha</th>
+                <th>Operación / Detalle</th>
+                <th style={{ width: '15%' }}>Documento</th>
+                <th style={{ width: '18%', textAlign: 'right' }}>Monto Original</th>
+                <th style={{ width: '15%', textAlign: 'right' }}>Referencia TCP</th>
+                <th style={{ width: '18%', textAlign: 'right' }}>Impacto</th>
+              </tr>
+            )}
+          </thead>
+          <tbody>
+            {filteredSearch.map((item, idx) => {
+              const match = item.tipo === 'cc' && item.operacion.match(/x\s*(\d+)/i);
+              const ccQty = match ? `${match[1]} u` : '--';
+              return (
+                <tr key={idx}>
+                  <td>{new Date(item.fecha).toLocaleDateString('es-AR')}</td>
+                  <td style={{ textAlign: 'left' }}>{item.operacion}</td>
+                  <td style={{ textAlign: 'center' }}>{item.documento}</td>
+                  
+                  {historyView === 'consolidado' && (
+                    <>
+                      <td style={{ textAlign: 'center' }}>
+                        {item.tipo === 'delivery' ? `${item.tambores} TCM` : item.tipo === 'envase' ? (item.tambores > 0 ? `+${item.tambores} u` : `${item.tambores} u`) : '--'}
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: item.tipo === 'cc' ? 700 : 400 }}>
+                        {item.tipo === 'cc' ? item.importe : '--'}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {item.tipo === 'cc' && item.tcp ? `$ ${item.tcp.toLocaleString('es-AR', { minimumFractionDigits: 2 })}` : '--'}
+                      </td>
+                    </>
+                  )}
+
+                  {historyView === 'productos' && (
+                    <td style={{ textAlign: 'center', fontWeight: 700 }}>
+                      {item.tipo === 'delivery' ? `${item.tambores} TCM (${item.importe})` : item.tipo === 'envase' ? (item.tambores > 0 ? `+${item.tambores} u` : `${item.tambores} u`) : ccQty}
+                    </td>
+                  )}
+
+                  {historyView === 'financiero' && (
+                    <>
+                      <td style={{ textAlign: 'right' }}>
+                        {item.moneda === 'USD' ? `u$s ${item.monto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}` : `$ ${item.monto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {item.tcp ? `$ ${item.tcp.toLocaleString('es-AR', { minimumFractionDigits: 2 })}` : '--'}
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: item.tipoMovimiento === 'DEBE' ? '#c5221f' : '#137333' }}>
+                        {item.tipoMovimiento === 'DEBE' ? '-' : '+'}{item.moneda === 'USD' ? 'u$s' : '$'} {item.monto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                      </td>
+                    </>
+                  )}
+                </tr>
+              );
+            })}
+            {filteredSearch.length === 0 && (
+              <tr>
+                <td colSpan={historyView === 'consolidado' ? 6 : historyView === 'financiero' ? 6 : 4} style={{ textAlign: 'center', padding: '2rem', color: '#555' }}>
+                  No hay registros en esta vista.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+
+        <div className="print-signatures">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3rem' }}>
+            <div style={{ height: '1.5cm' }}></div>
+            <div className="print-signature-line">
+              Firma del Apicultor
+              <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 400, marginTop: '0.25rem' }}>
+                Aclaración: ________________________ | DNI: _______________
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3rem' }}>
+            <div style={{ height: '1.5cm' }}></div>
+            <div className="print-signature-line">
+              Firma Autorizada Geomiel S.A.
+              <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 400, marginTop: '0.25rem' }}>
+                Sector Administración y Control
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    <style>{`
+      @media print {
+        body, html {
+          background: #ffffff !important;
+          color: #000000 !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .no-print {
+          display: none !important;
+        }
+        .print-only {
+          display: block !important;
+        }
+        .print-remito-container {
+          font-family: 'Inter', 'Outfit', 'Helvetica Neue', sans-serif;
+          padding: 2cm;
+          background: white;
+          color: black;
+        }
+        .print-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom: 3px double #333;
+          padding-bottom: 1.5rem;
+          margin-bottom: 2rem;
+        }
+        .print-title-block {
+          text-align: right;
+        }
+        .print-title {
+          font-size: 2rem;
+          font-weight: 800;
+          color: #08201a;
+          margin: 0 0 0.25rem 0;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+        .print-subtitle {
+          font-size: 0.9rem;
+          color: #555;
+          margin: 0;
+        }
+        .print-details-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 2rem;
+          margin-bottom: 2rem;
+        }
+        .print-details-box {
+          border: 1px solid #ccc;
+          border-radius: 8px;
+          padding: 1rem;
+        }
+        .print-details-box h4 {
+          margin: 0 0 0.5rem 0;
+          border-bottom: 1px solid #eee;
+          padding-bottom: 0.25rem;
+          font-size: 0.9rem;
+          text-transform: uppercase;
+          color: #08201a;
+        }
+        .print-details-box p {
+          margin: 0.35rem 0;
+          font-size: 0.85rem;
+          line-height: 1.4;
+        }
+        .print-table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: 3rem;
+        }
+        .print-table th {
+          background-color: #f2f2f2 !important;
+          border: 1px solid #ddd;
+          padding: 8px;
+          text-align: left;
+          font-size: 0.85rem;
+          font-weight: bold;
+          color: #08201a;
+        }
+        .print-table td {
+          border: 1px solid #ddd;
+          padding: 8px;
+          font-size: 0.8rem;
+          line-height: 1.3;
+        }
+        .print-signatures {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 4rem;
+          margin-top: 4rem;
+          page-break-inside: avoid;
+        }
+        .print-signature-line {
+          border-top: 1px solid #000;
+          text-align: center;
+          padding-top: 0.5rem;
+          font-size: 0.85rem;
+          font-weight: 500;
+        }
+      }
+      @media screen {
+        .print-only {
+          display: none !important;
+        }
+      }
+    `}</style>
+  </>
+);
 }
 
 export default App;
