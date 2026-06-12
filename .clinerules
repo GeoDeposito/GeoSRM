@@ -37,5 +37,6 @@ All AI assistants working on this codebase MUST follow these instructions strict
    - **Ficha Técnica Unification (Option A)**: The bottom `<details>` panel is deleted. Unique columns like `Precio Ref. Miel` and `Miel Equiv.` are merged directly into the main `Financiero` ledger table.
    - **RENAPA Validation**: CUIT lookup via `public.consultar_renapa(...)` RPC.
    - **DNI Generation**: Extracted from CUIT central part in real-time.
-   - **SharePoint Integration**: Power Automate calls `public.registrar_tcm_desde_sharepoint(...)` RPC.
+   - **SharePoint Integration**: Power Automate calls `public.registrar_tcm_desde_sharepoint(...)` RPC. The frontend dashboard does not contain any manual Excel import card since sync is strictly automatic.
+   - **Clean PDF Printing Layout**: Hides browser-default headers/footers (title, date, URL, page numbers) using `@page { margin: 0; }` under `@media print` combined with a padded container wrapper. The Romaneo print template is titled "Detalle de Tambores", uses header units `(kg)` with clean numeric cell values to avoid text wrapping, and includes a totals/averages summary row at the bottom of the table.
    - **⚠️ PWA Caching**: Vite precaches bundle files through a Service Worker (`dist/sw.js`). A hard refresh (Ctrl+F5) or clearing site data is required to see newly deployed bundles.

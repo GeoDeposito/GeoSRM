@@ -21,7 +21,6 @@ import {
 import { srmService } from './services/srmService';
 import { isMockMode } from './services/supabaseClient';
 import type { Apicultor, ApicultorCompleto, Producto, FichaEntregaMiel } from './types/srm.types';
-import * as XLSX from 'xlsx';
 import './App.css';
 
 
@@ -137,11 +136,6 @@ function App() {
   const [nombreSearchQuery, setNombreSearchQuery] = useState('');
   const [paretoSearchQuery, setParetoSearchQuery] = useState('');
   const [mostrarSimulacionPareto, setMostrarSimulacionPareto] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [isImportingExcel, setIsImportingExcel] = useState(false);
-  const [importProgress, setImportProgress] = useState(0);
-  const [importTotal, setImportTotal] = useState(0);
-  const [importErrorCount, setImportErrorCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   
@@ -159,7 +153,6 @@ function App() {
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedAuth, setCopiedAuth] = useState(false);
   const [copiedBody, setCopiedBody] = useState(false);
-  const [syncTab, setSyncTab] = useState<'auto' | 'manual'>('auto');
   
   // Estados de formularios
   const [newApicultorForm, setNewApicultorForm] = useState({
@@ -520,130 +513,6 @@ function App() {
     }
   };
 
-  const handleImportarExcel = async (file: File) => {
-    setIsImportingExcel(true);
-    setImportProgress(0);
-    setImportTotal(0);
-    setImportErrorCount(0);
-    setSyncMessage(null);
-    
-    try {
-      const data = await file.arrayBuffer();
-      const workbook = XLSX.read(data, { type: 'array' });
-      
-      const sheetName = workbook.SheetNames.find(name => 
-        name.toLowerCase().includes('pesaje') || 
-        name.toLowerCase().includes('romaneo') || 
-        name.toLowerCase().includes('tambor') ||
-        name.toLowerCase().includes('datos')
-      ) || workbook.SheetNames[0];
-      
-      const worksheet = workbook.Sheets[sheetName];
-      const rawRows = XLSX.utils.sheet_to_json(worksheet) as any[];
-      
-      if (rawRows.length === 0) {
-        setSyncMessage("Error: El archivo de Excel está vacío o no contiene hojas legibles.");
-        setIsImportingExcel(false);
-        return;
-      }
-
-      console.log("Filas leídas de Excel:", rawRows.length, rawRows);
-      
-      const findKey = (row: any, keywords: string[]) => {
-        const keys = Object.keys(row);
-        for (const kw of keywords) {
-          const match = keys.find(k => 
-            k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(kw.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""))
-          );
-          if (match) return match;
-        }
-        return null;
-      };
-
-      const mappedRows: any[] = [];
-      for (const row of rawRows) {
-        const kFecha = findKey(row, ['fecha depo', 'fecha', 'deposito']);
-        const kRomaneo = findKey(row, ['romaneo', 'remito', 'entrega']);
-        const kApicultor = findKey(row, ['apicultor', 'nombre', 'proveedor']);
-        const kIdGeo = findKey(row, ['id geo', 'tambor', 'nro_tambor', 'tcm']);
-        const kSenasa = findKey(row, ['senasa', 'barras_ean', 'codigo_senasa', 'ean']);
-        const kBruto = findKey(row, ['peso bruto', 'bruto', 'kilos_bruto']);
-        const kTara = findKey(row, ['tara', 'peso tara']);
-        
-        const kColor = findKey(row, ['color', 'pfund']);
-        const kHumedad = findKey(row, ['humedad', 'hum']);
-        const kHmf = findKey(row, ['hmf']);
-
-        if (!kRomaneo || !kIdGeo) continue;
-
-        let fechaIso = new Date().toISOString();
-        if (kFecha && row[kFecha]) {
-          const fVal = row[kFecha];
-          if (typeof fVal === 'number') {
-            const excelEpoch = new Date(Date.UTC(1899, 11, 30));
-            const msInDay = 24 * 60 * 60 * 1000;
-            fechaIso = new Date(excelEpoch.getTime() + fVal * msInDay).toISOString();
-          } else {
-            try {
-              fechaIso = new Date(fVal).toISOString();
-            } catch (e) {
-              fechaIso = new Date().toISOString();
-            }
-          }
-        }
-
-        const nombreApicultor = kApicultor ? String(row[kApicultor]).trim() : 'Apicultor Desconocido';
-        const brutoVal = kBruto ? parseFloat(String(row[kBruto]).replace(',', '.')) : 300;
-        const taraVal = kTara ? parseFloat(String(row[kTara]).replace(',', '.')) : 16;
-        
-        mappedRows.push({
-          apicultor_nombre: nombreApicultor,
-          cuit: '',
-          fecha: fechaIso,
-          romaneo: String(row[kRomaneo]).trim(),
-          nro_tambor: String(row[kIdGeo]).trim(),
-          barras_ean: kSenasa ? String(row[kSenasa]).trim() : '',
-          lote: 14002,
-          kilos_bruto: isNaN(brutoVal) ? 300 : brutoVal,
-          tara: isNaN(taraVal) ? 16 : taraVal,
-          color_pfund: kColor ? parseFloat(String(row[kColor]).replace(',', '.')) : 34,
-          humedad: kHumedad ? parseFloat(String(row[kHumedad]).replace(',', '.')) : 17.2,
-          hmf: kHmf ? parseFloat(String(row[kHmf]).replace(',', '.')) : 12.5,
-          antibiotico: 'NEGATIVO'
-        });
-      }
-
-      if (mappedRows.length === 0) {
-        setSyncMessage("Error: No se encontraron columnas que coincidan con 'Romaneo' e 'ID GEO'.");
-        setIsImportingExcel(false);
-        return;
-      }
-
-      setImportTotal(mappedRows.length);
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (let i = 0; i < mappedRows.length; i++) {
-        const row = mappedRows[i];
-        try {
-          await srmService.registrarTcmDesdeExcel(row);
-          successCount++;
-        } catch (err) {
-          console.error("Error importando fila de Excel:", row, err);
-          errorCount++;
-        }
-        setImportProgress(i + 1);
-        setImportErrorCount(errorCount);
-      }
-
-      setSyncMessage(`Importación completada. Se procesaron ${mappedRows.length} filas: ${successCount} tambores (TCM) importados/actualizados y ${errorCount} errores.`);
-      await cargarApicultores();
-    } catch (err: any) {
-      setSyncMessage("Error leyendo el archivo Excel: " + err.message);
-    } finally {
-      setIsImportingExcel(false);
-    }
-  };
 
   const handleVerificarRenapa = async (
     cuit: string, 
@@ -1951,245 +1820,53 @@ function App() {
                 </div>
               </div>
 
-              {/* Ficha Destacada Ruiz y Tipo de Miel */}
-              <div className="charts-grid">
-                
-                {/* Ruiz Rubén Oscar Quick Access */}
-                <div className="card-premium" style={{ borderLeft: '4px solid var(--secondary)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div>
-                        <span className="label-caps" style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontWeight: 700 }}>Productor Destacado</span>
-                        <h3 className="font-title" style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)', marginTop: '0.25rem', marginBottom: '0.5rem' }}>Ruiz Rubén Oscar</h3>
-                      </div>
-                      <div className="badge badge-success">Activo</div>
+              {/* Ruiz Rubén Oscar Quick Access */}
+              <div className="card-premium" style={{ borderLeft: '4px solid var(--secondary)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <span className="label-caps" style={{ fontSize: '0.65rem', color: 'var(--secondary)', fontWeight: 700 }}>Productor Destacado</span>
+                      <h3 className="font-title" style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-title)', marginTop: '0.25rem', marginBottom: '0.5rem' }}>Ruiz Rubén Oscar</h3>
                     </div>
-                    <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.4, marginBottom: '1rem' }}>
-                      Acceso rápido al perfil de Ruiz Rubén Oscar (General Pico). Visualiza sus 8 entregas, control de 147 tambores individuales, control de envases vacíos (saldo de 137 tambores) y cuenta corriente de doble saldo.
-                    </p>
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr',
-                      gap: '0.75rem',
-                      backgroundColor: 'rgba(8, 32, 26, 0.03)',
-                      padding: '0.75rem',
-                      borderRadius: '8px',
-                      fontSize: '0.8rem',
-                      marginBottom: '1rem'
-                    }}>
-                      <div><strong>CUIT:</strong> 20-08046134-4</div>
-                      <div><strong>Localidad:</strong> G. Pico, La Pampa</div>
-                      <div><strong>Entregas:</strong> 8 registradas</div>
-                      <div><strong>Tambores:</strong> 147 individuales</div>
-                    </div>
+                    <div className="badge badge-success">Activo</div>
                   </div>
-                  
-                  <button 
-                    onClick={() => seleccionarApicultor('e37fb194-9e25-5d90-b912-9925001072c0')}
-                    className="font-title"
-                    style={{
-                      width: '100%',
-                      padding: '0.75rem',
-                      backgroundColor: 'var(--secondary)',
-                      color: '#FFFFFF',
-                      borderRadius: '8px',
-                      textAlign: 'center',
-                      cursor: 'pointer',
-                      border: 'none',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    Ver Ficha Completa de Ruiz
-                  </button>
-                </div>
-                
-                {/* Sincronización de Pesajes (TCM) */}
-                <div className="card-premium" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '340px' }}>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div>
-                        <span className="badge badge-success" style={{ fontSize: '0.65rem' }}>Automatización de Pesajes</span>
-                        <h3 className="font-title" style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-title)', marginTop: '0.25rem', marginBottom: '0.5rem' }}>
-                          Base de Datos de Pesajes (TCM)
-                        </h3>
-                      </div>
-                      <span className="material-symbols-outlined" style={{ color: 'var(--primary)', opacity: 0.7 }}>table_chart</span>
-                    </div>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.4, marginBottom: '0.75rem' }}>
-                      Conecte sus Romaneos y tambores (TCM) del archivo central de SharePoint en tiempo real o cargue manualmente.
-                    </p>
-
-                    {/* Barra de Pestañas (Tabs) */}
-                    <div style={{ display: 'flex', gap: '0.25rem', padding: '0.2rem', backgroundColor: '#F0F0F0', borderRadius: '8px', marginBottom: '0.75rem' }}>
-                      <button
-                        type="button"
-                        onClick={() => setSyncTab('auto')}
-                        style={{
-                          flex: 1,
-                          padding: '0.4rem',
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          borderRadius: '6px',
-                          border: 'none',
-                          cursor: 'pointer',
-                          backgroundColor: syncTab === 'auto' ? '#137333' : 'transparent',
-                          color: syncTab === 'auto' ? '#FFFFFF' : 'var(--text-secondary)',
-                          transition: 'all 0.15s ease',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '0.25rem'
-                        }}
-                      >
-                        <span className="material-symbols-outlined" style={{ fontSize: '0.9rem' }}>bolt</span>
-                        Real-Time (Auto)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSyncTab('manual')}
-                        style={{
-                          flex: 1,
-                          padding: '0.4rem',
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          borderRadius: '6px',
-                          border: 'none',
-                          cursor: 'pointer',
-                          backgroundColor: syncTab === 'manual' ? 'var(--primary)' : 'transparent',
-                          color: syncTab === 'manual' ? '#FFFFFF' : 'var(--text-secondary)',
-                          transition: 'all 0.15s ease',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '0.25rem'
-                        }}
-                      >
-                        <span className="material-symbols-outlined" style={{ fontSize: '0.9rem' }}>upload_file</span>
-                        Carga Manual
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    {syncMessage && (
-                      <div style={{
-                        padding: '0.65rem',
-                        backgroundColor: syncMessage.includes('Error') ? '#FFE5E5' : '#E8F5E9',
-                        color: syncMessage.includes('Error') ? '#C62828' : '#2E7D32',
-                        borderRadius: '6px',
-                        fontSize: '0.75rem',
-                        fontWeight: 600,
-                        marginBottom: '0.75rem',
-                        lineHeight: 1.3
-                      }}>
-                        {syncMessage}
-                      </div>
-                    )}
-
-                    {syncTab === 'auto' ? (
-                      <div style={{
-                        backgroundColor: 'rgba(19,115,51,0.04)',
-                        border: '1px solid rgba(19,115,51,0.15)',
-                        padding: '0.8rem',
-                        borderRadius: '10px',
-                        fontSize: '0.75rem',
-                        lineHeight: 1.4,
-                        color: 'var(--text-body)'
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.4rem' }}>
-                          <span className="material-symbols-outlined" style={{ fontSize: '1.1rem', color: '#137333', fontWeight: 'bold' }}>bolt</span>
-                          <strong style={{ color: '#137333', fontSize: '0.8rem' }}>Ingreso en Tiempo Real</strong>
-                        </div>
-                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', margin: '0 0 0.6rem 0' }}>
-                          Conecte su Power Automate para insertar cada tambor (TCM) automáticamente en el SRM en cuanto se agregue una fila en el Excel de SharePoint.
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => setShowPowerAutomateGuide(true)}
-                          style={{
-                            width: '100%',
-                            padding: '0.6rem',
-                            backgroundColor: '#137333',
-                            color: '#FFFFFF',
-                            border: 'none',
-                            borderRadius: '8px',
-                            fontWeight: 700,
-                            fontSize: '0.75rem',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '0.3rem',
-                            boxShadow: '0 2px 4px rgba(19,115,51,0.15)',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          <span className="material-symbols-outlined" style={{ fontSize: '0.95rem' }}>settings_ethernet</span>
-                          Configurar Conexión Real-Time
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        {isImportingExcel ? (
-                          <div style={{
-                            padding: '0.8rem',
-                            backgroundColor: '#F9F9F9',
-                            borderRadius: '10px',
-                            border: '1px solid var(--border-color)',
-                            textAlign: 'center'
-                          }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
-                              <span className="material-symbols-outlined spinning" style={{ color: 'var(--primary)', fontSize: '1.2rem' }}>sync</span>
-                              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-title)' }}>Procesando planilla Excel...</span>
-                            </div>
-                            <div style={{ height: '6px', backgroundColor: '#E0E0E0', borderRadius: '3px', overflow: 'hidden', marginBottom: '0.25rem' }}>
-                              <div style={{ height: '100%', backgroundColor: 'var(--primary)', width: `${(importProgress / importTotal) * 100}%`, transition: 'width 0.1s ease' }} />
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
-                              <span>Cargados: {importProgress} de {importTotal}</span>
-                              {importErrorCount > 0 && <span style={{ color: 'var(--danger)' }}>Errores: {importErrorCount}</span>}
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <input 
-                              type="file" 
-                              accept=".xlsx, .xls"
-                              onChange={(e) => {
-                                if (e.target.files && e.target.files[0]) {
-                                  handleImportarExcel(e.target.files[0]);
-                                }
-                              }}
-                              style={{ display: 'none' }}
-                              id="excel-upload-input"
-                            />
-                            <label 
-                              htmlFor="excel-upload-input"
-                              style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                border: '2px dashed var(--primary)',
-                                borderRadius: '12px',
-                                padding: '0.75rem',
-                                backgroundColor: 'rgba(242, 172, 22, 0.02)',
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease',
-                                textAlign: 'center'
-                              }}
-                            >
-                              <span className="material-symbols-outlined" style={{ fontSize: '1.6rem', color: 'var(--primary)', marginBottom: '0.2rem' }}>upload_file</span>
-                              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-title)' }}>Cargar Planilla (.xlsx)</span>
-                              <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Seleccione o arrastre el archivo central</span>
-                            </label>
-                          </>
-                        )}
-                      </>
-                    )}
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.4, marginBottom: '1rem' }}>
+                    Acceso rápido al perfil de Ruiz Rubén Oscar (General Pico). Visualiza sus 8 entregas, control de 147 tambores individuales, control de envases vacíos (saldo de 137 tambores) y cuenta corriente de doble saldo.
+                  </p>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '0.75rem',
+                    backgroundColor: 'rgba(8, 32, 26, 0.03)',
+                    padding: '0.75rem',
+                    borderRadius: '8px',
+                    fontSize: '0.8rem',
+                    marginBottom: '1rem'
+                  }}>
+                    <div><strong>CUIT:</strong> 20-08046134-4</div>
+                    <div><strong>Localidad:</strong> G. Pico, La Pampa</div>
+                    <div><strong>Entregas:</strong> 8 registradas</div>
+                    <div><strong>Tambores:</strong> 147 individuales</div>
                   </div>
                 </div>
-
+                
+                <button 
+                  onClick={() => seleccionarApicultor('e37fb194-9e25-5d90-b912-9925001072c0')}
+                  className="font-title"
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    backgroundColor: 'var(--secondary)',
+                    color: '#FFFFFF',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    border: 'none',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  Ver Ficha Completa de Ruiz
+                </button>
               </div>
 
               {/* Catálogo de Insumos y Productos (Geomiel) */}
@@ -3702,7 +3379,7 @@ function App() {
                                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                                             <h4 className="font-title" style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-title)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.35rem', margin: 0 }}>
                                               <span className="material-symbols-outlined" style={{ fontSize: '1rem', color: 'var(--primary)' }}>science</span>
-                                              Detalle Técnico de Tambores - {item.documento}
+                                              Detalle de Tambores - {item.documento}
                                             </h4>
                                             
                                             <button
@@ -5974,167 +5651,205 @@ function App() {
     )}
 
     {/* Container de Impresión (Romaneo PDF) */}
-    {apicultorSeleccionado && romaneoAImprimir && (
-      <div className="print-only print-remito-container print-romaneo-container">
-        <div className="print-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <img 
-              src="/logo-geomiel.png?v=4" 
-              alt="GeoMiel Logo" 
-              style={{ height: '50px', width: 'auto', objectFit: 'contain' }} 
-            />
-            <div style={{ textAlign: 'left' }}>
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 900, color: '#08201a', margin: 0, letterSpacing: '0.05em' }}>
-                GEOMIEL S.A.
-              </h2>
-              <p style={{ fontSize: '0.75rem', color: '#555', margin: '0.1rem 0 0 0', lineHeight: 1.3 }}>
-                Dirección: J. Sampayo 180, General Pico, La Pampa<br />
-                Teléfono: 2302 520218 | Email: contacto@geomiel.com.ar
+    {apicultorSeleccionado && romaneoAImprimir && (() => {
+      const tambores = romaneoAImprimir.tambores || [];
+      const totalBruto = tambores.reduce((acc: number, t: any) => acc + (t.kilos_bruto || 0), 0);
+      const totalTara = tambores.reduce((acc: number, t: any) => acc + (t.tara || 0), 0);
+      const totalNeto = tambores.reduce((acc: number, t: any) => acc + (t.kilos_neto || 0), 0);
+
+      const rStats = computeRomaneoStats(tambores);
+      const x = tambores.length || romaneoAImprimir.cantidad_tambores || 0;
+      const y = rStats.altos;
+      const z = rStats.petisos;
+      const R = rStats.clara;
+      const P = rStats.oscura;
+
+      // Quality indices averages
+      const validHumedad = tambores.filter((t: any) => t.humedad != null);
+      const avgHumedad = validHumedad.length > 0 ? (validHumedad.reduce((acc: number, t: any) => acc + t.humedad, 0) / validHumedad.length) : null;
+
+      const validColor = tambores.filter((t: any) => t.color_pfund != null);
+      const avgColor = validColor.length > 0 ? (validColor.reduce((acc: number, t: any) => acc + t.color_pfund, 0) / validColor.length) : null;
+
+      const validHmf = tambores.filter((t: any) => t.hmf != null);
+      const avgHmf = validHmf.length > 0 ? (validHmf.reduce((acc: number, t: any) => acc + t.hmf, 0) / validHmf.length) : null;
+
+      return (
+        <div className="print-only print-remito-container print-romaneo-container">
+          <div className="print-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <img 
+                src="/logo-geomiel.png?v=4" 
+                alt="GeoMiel Logo" 
+                style={{ height: '50px', width: 'auto', objectFit: 'contain' }} 
+              />
+              <div style={{ textAlign: 'left' }}>
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 900, color: '#08201a', margin: 0, letterSpacing: '0.05em' }}>
+                  GEOMIEL S.A.
+                </h2>
+                <p style={{ fontSize: '0.75rem', color: '#555', margin: '0.1rem 0 0 0', lineHeight: 1.3 }}>
+                  Dirección: J. Sampayo 180, General Pico, La Pampa<br />
+                  Teléfono: 2302 520218 | Email: contacto@geomiel.com.ar
+                </p>
+              </div>
+            </div>
+            <div className="print-title-block">
+              <h1 className="print-title" style={{ fontSize: '1.6rem' }}>Romaneo Oficial</h1>
+              <p className="print-subtitle">
+                Nro: #{romaneoAImprimir.romaneo || 'S/N'}
+              </p>
+              <p style={{ fontSize: '0.8rem', color: '#555', margin: '0.1rem 0 0 0' }}>
+                Fecha: {new Date(romaneoAImprimir.fecha).toLocaleDateString('es-AR')}
               </p>
             </div>
           </div>
-          <div className="print-title-block">
-            <h1 className="print-title" style={{ fontSize: '1.6rem' }}>Romaneo Oficial</h1>
-            <p className="print-subtitle">
-              Nro: #{romaneoAImprimir.romaneo || 'S/N'}
-            </p>
-            <p style={{ fontSize: '0.8rem', color: '#555', margin: '0.1rem 0 0 0' }}>
-              Fecha: {new Date(romaneoAImprimir.fecha).toLocaleDateString('es-AR')}
-            </p>
-          </div>
-        </div>
 
-        <div className="print-details-grid">
-          <div className="print-details-box" style={{ textAlign: 'left' }}>
-            <h4>Datos del Apicultor</h4>
-            <p><strong>Nombre / Razón Social:</strong> {apicultorSeleccionado.nombre}</p>
-            <p><strong>CUIT:</strong> {apicultorSeleccionado.cuit}</p>
-            <p>
-              <strong>RENPA:</strong> {apicultorSeleccionado.renapa || '--'}{' '}
-              {renapaVigencia && (
-                <span style={{ 
-                  fontWeight: 700, 
-                  color: renapaVigencia === 'Vigente' ? '#137333' : renapaVigencia === 'Vencido' ? '#c5221f' : '#555' 
-                }}>
-                  ({renapaVigencia.toUpperCase()})
-                </span>
-              )}
-            </p>
-            <p><strong>Localidad:</strong> {apicultorSeleccionado.localidad || '--'} ({apicultorSeleccionado.provincia || '--'})</p>
-          </div>
-          <div className="print-details-box" style={{ textAlign: 'left' }}>
-            <h4>Información de la Entrega</h4>
-            <p><strong>Viaje / Transporte:</strong> {romaneoAImprimir.nro_viaje || '--'}</p>
-            <p><strong>Chofer:</strong> {romaneoAImprimir.chofer || '--'}</p>
-            <p><strong>Observaciones:</strong> {romaneoAImprimir.observaciones || '--'}</p>
-            <p><strong>Kilos Neto Total:</strong> {romaneoAImprimir.kilos_neto ? `${romaneoAImprimir.kilos_neto.toLocaleString('es-AR')} kg` : '--'}</p>
-          </div>
-        </div>
-
-        {/* Clasificación Summary */}
-        {(() => {
-          const rStats = computeRomaneoStats(romaneoAImprimir.tambores || []);
-          const x = romaneoAImprimir.tambores?.length || romaneoAImprimir.cantidad_tambores || 0;
-          const y = rStats.altos;
-          const z = rStats.petisos;
-          const R = rStats.clara;
-          const P = rStats.oscura;
-          return (
-            <div style={{
-              padding: '0.75rem 1rem',
-              backgroundColor: '#F8FAFC',
-              borderRadius: '8px',
-              borderLeft: '4px solid var(--secondary)',
-              fontSize: '0.9rem',
-              color: '#08201a',
-              marginBottom: '1.5rem',
-              textAlign: 'left',
-              lineHeight: 1.4,
-              border: '1px solid #ddd',
-              borderLeftWidth: '5px'
-            }}>
-              🍯 <strong>Clasificación de Acopio:</strong> Romaneo con <strong>{x}</strong> TCM, de los cuales <strong>{y}</strong> son altos y <strong>{z}</strong> son petisos; <strong>{R}</strong> son de miel clara y <strong>{P}</strong> son de miel oscura.
-            </div>
-          );
-        })()}
-
-        <h3 style={{ fontSize: '1.1rem', borderBottom: '1px solid #333', paddingBottom: '0.25rem', marginBottom: '1rem', color: '#08201a', textAlign: 'left' }}>
-          Detalle Técnico de Tambores (TCMs)
-        </h3>
-
-        <table className="print-table">
-          <thead>
-            <tr>
-              <th>ID GEO (Tambor)</th>
-              <th>Cod. SENASA</th>
-              <th>Lote</th>
-              <th style={{ textAlign: 'right' }}>Peso Bruto</th>
-              <th style={{ textAlign: 'right' }}>Tara</th>
-              <th style={{ textAlign: 'right' }}>Peso Neto</th>
-              <th style={{ textAlign: 'center' }}>Humedad</th>
-              <th style={{ textAlign: 'center' }}>Color (mm)</th>
-              <th style={{ textAlign: 'center' }}>HMF</th>
-              <th>Antibiótico</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(romaneoAImprimir.tambores || []).map((t: any) => (
-              <tr key={t.id}>
-                <td style={{ fontWeight: 700 }}>{t.nro_tambor}</td>
-                <td>{t.barras_ean || '-'}</td>
-                <td>{t.lote || '-'}</td>
-                <td style={{ textAlign: 'right' }}>{t.kilos_bruto != null ? `${t.kilos_bruto.toFixed(1)} kg` : '-'}</td>
-                <td style={{ textAlign: 'right' }}>{t.tara != null ? `${t.tara.toFixed(1)} kg` : '-'}</td>
-                <td style={{ textAlign: 'right', fontWeight: 700 }}>{t.kilos_neto != null ? `${t.kilos_neto.toFixed(1)} kg` : '-'}</td>
-                <td style={{ textAlign: 'center', fontWeight: t.humedad && t.humedad > 18 ? 700 : 400, color: t.humedad && t.humedad > 18 ? '#c5221f' : 'inherit' }}>
-                  {t.humedad != null ? `${t.humedad}%` : '-'}
-                </td>
-                <td style={{ textAlign: 'center' }}>{t.color_pfund != null ? `${t.color_pfund} mm` : '-'}</td>
-                <td style={{ textAlign: 'center', fontWeight: t.hmf && t.hmf > 40 ? 700 : 400, color: t.hmf && t.hmf > 40 ? '#c5221f' : 'inherit' }}>
-                  {t.hmf != null ? `${t.hmf} mg/kg` : '-'}
-                </td>
-                <td>
-                  <span style={{ fontWeight: 700, color: t.antibiotico === 'POSITIVO' ? '#c5221f' : '#137333' }}>
-                    {t.antibiotico || 'NEGATIVO'}
+          <div className="print-details-grid">
+            <div className="print-details-box" style={{ textAlign: 'left' }}>
+              <h4>Datos del Apicultor</h4>
+              <p><strong>Nombre / Razón Social:</strong> {apicultorSeleccionado.nombre}</p>
+              <p><strong>CUIT:</strong> {apicultorSeleccionado.cuit}</p>
+              <p>
+                <strong>RENPA:</strong> {apicultorSeleccionado.renapa || '--'}{' '}
+                {renapaVigencia && (
+                  <span style={{ 
+                    fontWeight: 700, 
+                    color: renapaVigencia === 'Vigente' ? '#137333' : renapaVigencia === 'Vencido' ? '#c5221f' : '#555' 
+                  }}>
+                    ({renapaVigencia.toUpperCase()})
                   </span>
-                </td>
-              </tr>
-            ))}
-            {(!romaneoAImprimir.tambores || romaneoAImprimir.tambores.length === 0) && (
-              <tr>
-                <td colSpan={10} style={{ textAlign: 'center', padding: '2rem', color: '#555' }}>
-                  No hay tambores individuales registrados para este romaneo.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-
-        <div className="print-signatures">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '3rem' }}>
-            <div style={{ height: '1.5cm' }}></div>
-            <div className="print-signature-line">
-              Firma del Apicultor
-              <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 400, marginTop: '0.25rem' }}>
-                Aclaración: ________________________ | DNI: _______________
-              </div>
+                )}
+              </p>
+              <p><strong>Localidad:</strong> {apicultorSeleccionado.localidad || '--'} ({apicultorSeleccionado.provincia || '--'})</p>
+            </div>
+            <div className="print-details-box" style={{ textAlign: 'left' }}>
+              <h4>Información de la Entrega</h4>
+              <p><strong>Viaje / Transporte:</strong> {romaneoAImprimir.nro_viaje || '--'}</p>
+              <p><strong>Chofer:</strong> {romaneoAImprimir.chofer || '--'}</p>
+              <p><strong>Observaciones:</strong> {romaneoAImprimir.observaciones || '--'}</p>
+              <p><strong>Kilos Neto Total:</strong> {romaneoAImprimir.kilos_neto ? `${romaneoAImprimir.kilos_neto.toLocaleString('es-AR')} kg` : '--'}</p>
             </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '3rem' }}>
-            <div style={{ height: '1.5cm' }}></div>
-            <div className="print-signature-line">
-              Firma Autorizada Geomiel S.A.
-              <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 400, marginTop: '0.25rem' }}>
-                Sector Recepción y Control de Calidad
+
+          {/* Clasificación Summary */}
+          <div style={{
+            padding: '0.75rem 1rem',
+            backgroundColor: '#F8FAFC',
+            borderRadius: '8px',
+            borderLeft: '4px solid var(--secondary)',
+            fontSize: '0.9rem',
+            color: '#08201a',
+            marginBottom: '1.5rem',
+            textAlign: 'left',
+            lineHeight: 1.4,
+            border: '1px solid #ddd',
+            borderLeftWidth: '5px'
+          }}>
+            🍯 <strong>Clasificación de Acopio:</strong> Romaneo con <strong>{x}</strong> TCM, de los cuales <strong>{y}</strong> son altos y <strong>{z}</strong> son petisos; <strong>{R}</strong> son de miel clara y <strong>{P}</strong> son de miel oscura.
+          </div>
+
+          <h3 style={{ fontSize: '1.1rem', borderBottom: '1px solid #333', paddingBottom: '0.25rem', marginBottom: '1rem', color: '#08201a', textAlign: 'left' }}>
+            Detalle de Tambores
+          </h3>
+
+          <table className="print-table">
+            <thead>
+              <tr>
+                <th>ID GEO (Tambor)</th>
+                <th>Cod. SENASA</th>
+                <th>Lote</th>
+                <th style={{ textAlign: 'right' }}>Peso Bruto (kg)</th>
+                <th style={{ textAlign: 'right' }}>Tara (kg)</th>
+                <th style={{ textAlign: 'right' }}>Peso Neto (kg)</th>
+                <th style={{ textAlign: 'center' }}>Humedad</th>
+                <th style={{ textAlign: 'center' }}>Color (mm)</th>
+                <th style={{ textAlign: 'center' }}>HMF</th>
+                <th>Antibiótico</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tambores.map((t: any) => (
+                <tr key={t.id}>
+                  <td style={{ fontWeight: 700 }}>{t.nro_tambor}</td>
+                  <td>{t.barras_ean || '-'}</td>
+                  <td>{t.lote || '-'}</td>
+                  <td style={{ textAlign: 'right' }}>{t.kilos_bruto != null ? t.kilos_bruto.toFixed(1) : '-'}</td>
+                  <td style={{ textAlign: 'right' }}>{t.tara != null ? t.tara.toFixed(1) : '-'}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700 }}>{t.kilos_neto != null ? t.kilos_neto.toFixed(1) : '-'}</td>
+                  <td style={{ textAlign: 'center', fontWeight: t.humedad && t.humedad > 18 ? 700 : 400, color: t.humedad && t.humedad > 18 ? '#c5221f' : 'inherit' }}>
+                    {t.humedad != null ? `${t.humedad}%` : '-'}
+                  </td>
+                  <td style={{ textAlign: 'center' }}>{t.color_pfund != null ? `${t.color_pfund} mm` : '-'}</td>
+                  <td style={{ textAlign: 'center', fontWeight: t.hmf && t.hmf > 40 ? 700 : 400, color: t.hmf && t.hmf > 40 ? '#c5221f' : 'inherit' }}>
+                    {t.hmf != null ? `${t.hmf} mg/kg` : '-'}
+                  </td>
+                  <td>
+                    <span style={{ fontWeight: 700, color: t.antibiotico === 'POSITIVO' ? '#c5221f' : '#137333' }}>
+                      {t.antibiotico || 'NEGATIVO'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {tambores.length > 0 && (
+                <tr style={{ fontWeight: 700, backgroundColor: '#f9f9f9', borderTop: '2px solid #333' }}>
+                  <td>TOTALES</td>
+                  <td>{tambores.length} Tambores</td>
+                  <td></td>
+                  <td style={{ textAlign: 'right' }}>{totalBruto.toFixed(1)}</td>
+                  <td style={{ textAlign: 'right' }}>{totalTara.toFixed(1)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700 }}>{totalNeto.toFixed(1)}</td>
+                  <td style={{ textAlign: 'center' }}>
+                    {avgHumedad != null ? `${avgHumedad.toFixed(1)}%` : '-'}
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    {avgColor != null ? `${avgColor.toFixed(1)} mm` : '-'}
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    {avgHmf != null ? `${avgHmf.toFixed(1)}` : '-'}
+                  </td>
+                  <td></td>
+                </tr>
+              )}
+              {tambores.length === 0 && (
+                <tr>
+                  <td colSpan={10} style={{ textAlign: 'center', padding: '2rem', color: '#555' }}>
+                    No hay tambores individuales registrados para este romaneo.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          <div className="print-signatures">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3rem' }}>
+              <div style={{ height: '1.5cm' }}></div>
+              <div className="print-signature-line">
+                Firma del Apicultor
+                <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 400, marginTop: '0.25rem' }}>
+                  Aclaración: ________________________ | DNI: _______________
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3rem' }}>
+              <div style={{ height: '1.5cm' }}></div>
+              <div className="print-signature-line">
+                Firma Autorizada Geomiel S.A.
+                <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 400, marginTop: '0.25rem' }}>
+                  Sector Recepción y Control de Calidad
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
-    )}
+      );
+    })()}
 
     <style>{`
       @media print {
+        @page {
+          size: auto;
+          margin: 0;
+        }
         body, html {
           background: #ffffff !important;
           color: #000000 !important;
@@ -6151,9 +5866,11 @@ function App() {
         }
         .print-remito-container {
           font-family: 'Inter', 'Outfit', 'Helvetica Neue', sans-serif;
-          padding: 2cm;
+          padding: 1.5cm 2cm;
           background: white;
           color: black;
+          box-sizing: border-box;
+          min-height: 100vh;
         }
         .print-header {
           display: flex;
